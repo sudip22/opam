@@ -2280,7 +2280,8 @@ let update_dev_package t nv =
       OpamMisc.Option.map OpamFile.OPAM.version opam
     in
     let repo_meta = (* Version from the repo *)
-      let nv = OpamPackage.create name (Option.default version user_version) in
+      let v = Option.default version user_version in
+      let nv = OpamPackage.create name v in
       try
         let dir = package_repo_dir t.root t.repositories t.package_index nv in
         hash_meta @@ local_opam ~root:true nv dir
@@ -2327,7 +2328,9 @@ let update_dev_package t nv =
     if result <> skip && new_meta <> [] &&
        new_meta <> old_meta && new_meta <> user_meta
     then
-      if old_meta = user_meta || repo_meta = user_meta then
+      if old_meta = user_meta || repo_meta = user_meta ||
+         user_meta = ["opam", `Opam (OpamFile.OPAM.create nv)]
+      then
         (* No manual changes *)
         (OpamGlobals.msg "Installing new package description for %s from %s\n"
            (OpamPackage.to_string nv)
