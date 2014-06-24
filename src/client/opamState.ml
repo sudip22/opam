@@ -35,7 +35,7 @@ let confirm fmt =
     try
       let rec loop () =
         OpamGlobals.msg "%s [Y/n] %!" msg;
-        if !OpamGlobals.yes then true
+        if !OpamGlobals.yes then (OpamGlobals.msg "y\n"; true)
         else match String.lowercase (read_line ()) with
           | "y" | "yes" | "" -> true
           | "n" | "no" -> false
@@ -420,10 +420,14 @@ let opam_opt t nv =
   if OpamFilename.exists overlay then
     let o = OpamFile.OPAM.read overlay in
     if OpamFile.OPAM.version o = OpamPackage.version nv then Some o
-    else
+    else if OpamPackage.Map.mem nv t.opams then
       (log "Looking for %s which is pinned to %s (not using overlay)"
          (OpamPackage.to_string nv) (OpamPackage.Version.to_string (OpamFile.OPAM.version o));
        base ())
+    else
+      (log "Opam file for %s not found: using the overlay even if it's for %s"
+         (OpamPackage.to_string nv) (OpamPackage.Version.to_string (OpamFile.OPAM.version o));
+       Some (OpamFile.OPAM.with_version o (OpamPackage.version nv)))
   else
     base ()
 
@@ -1216,7 +1220,7 @@ let switch_consistency_checks t =
        not (is_pinned t name) &&
        (not (is_name_installed t name) ||
         (* Don't cleanup installed packages which don't have any other metadata *)
-        OpamPackage.Map.exists (fun nv _ -> OpamPackage.name nv = name) t.package_index))
+        not (OpamPackage.Map.exists (fun nv _ -> OpamPackage.name nv = name) t.package_index)))
 
 type cache = {
   cached_opams: OpamFile.OPAM.t OpamPackage.Map.t;
@@ -2385,6 +2389,8 @@ let update_dev_package t nv =
       if pinning_kind = `version then [] else
       hash_meta @@ local_opam ~version_override:false nv srcdir
     in
+    let was_single_opam_file = OpamFilename.exists (srcdir // "opam") in
+    let just_opam = List.filter (function (_, `Opam _) -> true | _ -> false) in
     let user_meta, user_version = (* Installed version (overlay) *)
       let opam,_,_ as files =
         local_opam ~root:true ~version_override:false nv overlay in
@@ -2411,8 +2417,7 @@ let update_dev_package t nv =
       if OpamFilename.exists (srcdir // "opam") then
         (* Single opam file in the project src (ie not a directory):
            don't override other files, restrict to 'opam' *)
-        let f = List.filter (function (_, `Opam _) -> true | _ -> false) in
-        f user_meta, f old_meta, f repo_meta
+        just_opam user_meta, just_opam old_meta, just_opam repo_meta
       else user_meta, old_meta, repo_meta
     in
     let rec diff a b = match a,b with
@@ -2444,7 +2449,8 @@ let update_dev_package t nv =
        new_meta <> old_meta && new_meta <> user_meta
     then
       if old_meta = user_meta || repo_meta = user_meta ||
-         user_meta = ["opam", `Opam (OpamFile.OPAM.create nv)]
+         user_meta = ["opam", `Opam (OpamFile.OPAM.create nv)] ||
+         was_single_opam_file && old_meta = just_opam user_meta
       then
         (* No manual changes *)
         (OpamGlobals.msg "Installing new package description for %s from %s\n"

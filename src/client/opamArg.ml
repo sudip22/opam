@@ -1371,7 +1371,7 @@ let pin ?(unpin_only=false) () =
      `--dev-repo'. \
      Use url syntax or $(b,--kind) to explicitely set the kind of pinning. Git \
      pins may target a specific branch or commit using $(b,#branch) e.g. \
-     $(b,git:///home/me/pkg#testing). \
+     $(b,git://host/me/pkg#testing). \
      It is possible to create a new package if $(i,NAME) does not exist.";
     ["remove"]   , `remove, ["NAME"],
     "Unpins package $(b,NAME), restoring its definition from the repository, if any.";

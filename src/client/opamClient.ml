@@ -1154,6 +1154,16 @@ module API = struct
     in
 
     let reinstall = OpamPackage.Set.of_list reinstall in
+
+    let unavailable = reinstall -- Lazy.force t.available_packages in
+    if not (OpamPackage.Set.is_empty unavailable) then
+      OpamGlobals.error_and_exit
+        (if OpamPackage.Set.cardinal unavailable = 1
+         then "Package %s can't be reinstalled because it's no longer available"
+         else "Packages %s can't be reinstalled because they are no longer available")
+        (OpamMisc.pretty_list
+           (List.map OpamPackage.to_string (OpamPackage.Set.elements unavailable)));
+
     let universe = OpamState.universe t Depends in
     let depends = (* Do not cast to a set, we need to keep the order *)
       OpamSolver.reverse_dependencies
