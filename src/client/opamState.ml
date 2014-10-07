@@ -2345,7 +2345,9 @@ let install_compiler t ~quiet:_ switch compiler =
 
   let comp = OpamFile.Comp.read comp_f in
   begin try
-      if not (OpamFile.Comp.preinstalled comp) then begin
+      if not (OpamFile.Comp.preinstalled comp) &&
+         OpamFile.Comp.src comp <> None
+      then begin
 
         (* Install the compiler *)
         let comp_src = match OpamFile.Comp.src comp with
