@@ -264,6 +264,7 @@ type universe = {
   u_action   : user_action;
   u_installed_roots: package_set;
   u_pinned   : package_set;
+  u_base     : name_set;
 }
 
 (** {2 Command line arguments} *)
