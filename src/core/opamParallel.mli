@@ -30,30 +30,31 @@ type error =
 module type SIG = sig
 
   module G : G
+  module P : P
 
   val iter: int -> G.t ->
     pre:(G.V.t -> unit) ->
     child:(G.V.t -> unit) ->
     post:(G.V.t -> unit) ->
-    unit
+    int
 
   val iter_l: int -> G.vertex list ->
     pre:(G.V.t -> unit) ->
     child:(G.V.t -> unit) ->
     post:(G.V.t -> unit) ->
-    unit
+    int
 
   val map_reduce: int -> G.t ->
     map:(G.V.t -> 'a) ->
     merge:('a -> 'a -> 'a) ->
     init:'a ->
-    'a
+    'a * int
 
   val map_reduce_l: int -> G.vertex list ->
     map:(G.V.t -> 'a) ->
     merge:('a -> 'a -> 'a) ->
     init:'a ->
-    'a
+    'a * int
 
   val create: G.V.t list -> G.t
 

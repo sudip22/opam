@@ -36,12 +36,22 @@ module type SIG = sig
 
   module G : G
 
+  type ('a,'b) seq_command = Done of 'a
+                           | Run of 'b * (string * string list)
+
+  val iter:
+    jobs:int ->
+    command:(pred:(G.V.t * 'a) list -> G.V.t -> ('a,'b) seq_command) ->
+    post_command:('b -> OpamProcess.result -> ('a,'b) seq_command) ->
+    G.t ->
+    unit
+(*
   val iter: int -> G.t ->
     pre:(G.V.t -> unit) ->
     child:(G.V.t -> unit) ->
     post:(G.V.t -> unit) ->
     unit
-
+*)
   val iter_l: int -> G.vertex list ->
     pre:(G.V.t -> unit) ->
     child:(G.V.t -> unit) ->
@@ -84,20 +94,16 @@ module Make (G : G) : SIG with module G = G
   }
 
   let init graph =
-    let degree = ref M.empty in
-    let add_degree v d = degree := M.add v d !degree in
     let roots =
       G.fold_vertex
-        (fun v todo ->
+        (fun v (todo,degree) ->
           let d = G.in_degree graph v in
           if d = 0 then
-            S.add v todo
-          else (
-            add_degree v d;
-            todo
-          )
-        ) graph S.empty in
-    { graph ; roots ; degree = !degree ; visited = S.empty }
+            S.add v todo, degree
+          else
+            todo, M.add v d degree
+        ) graph (S.empty,M.empty) in
+    { graph ; roots ; degree ; visited = S.empty }
 
   let visit t x =
     if S.mem x t.visited then
@@ -159,11 +165,8 @@ module Make (G : G) : SIG with module G = G
   exception Errors of (G.V.t * error) list * G.V.t list
   exception Cyclic of G.V.t list list
 
-  let (--) = S.diff
-  let (++) = S.union
-  let (=|=) s1 s2 =
-    S.cardinal s1 = S.cardinal s2
-
+  open S.Op
+(*
   (* write and close the output channel *)
   let write_error oc r =
     log "write_error";
@@ -180,24 +183,18 @@ module Make (G : G) : SIG with module G = G
         Internal_error "Cannot read the error file" in
     close_in ic;
     r
-
-  let iter n g ~pre ~child ~post =
+*)
+  let map ~jobs ~command ~post_command g =
     let t = ref (init g) in
-    (* pid -> node * (fd to read the error code) *)
-    let pids = ref OpamMisc.IntMap.empty in
+    (* node -> OpamProcess.t * 'a *)
+    let running = ref M.empty in
     (* The nodes to process *)
     let todo = ref (!t.roots) in
-    (* node -> error *)
-    let errors = ref M.empty in
+    (* The computed results *)
+    let results = ref M.empty in
 
     (* All the node with a current worker currently doing some processing. *)
-    let worker_nodes () =
-      OpamMisc.IntMap.fold (fun _ (n, _) accu -> S.add n accu) !pids S.empty in
-    (* All the error nodes. *)
-    let error_nodes () =
-      M.fold (fun n _ accu -> S.add n accu) !errors S.empty in
-    (* All the node not successfully proceeded. This include error
-       worker and error nodes. *)
+    let worker_nodes () = S.of_list (M.keys !running) in
 
     log "Iterate over %a task(s) with %d process(es)"
       (slog @@ G.nb_vertex @> string_of_int) g n;
@@ -208,64 +205,53 @@ module Make (G : G) : SIG with module G = G
       raise (Cyclic sccs)
     );
 
-    let get_errors () =
+    let get_errors errors =
       (* Generate the remaining nodes in topological order *)
-      let error_nodes = error_nodes () in
       let remaining =
         G.fold_vertex (fun v l ->
-            if S.mem v !t.visited
-            || S.mem v error_nodes then
-                l
-            else
-              v::l) !t.graph [] in
-      Errors (M.bindings !errors, List.rev remaining) in
+            if S.mem v !t.visited || M.mem v errors then l
+            else v::l
+          ) !t.graph [] in
+      Errors (M.bindings errors, List.rev remaining) in
 
     (* nslots is the number of free slots *)
-    let rec loop nslots =
+    let rec loop nslots running todo results =
 
-      if OpamMisc.IntMap.is_empty !pids
-      && (S.is_empty !t.roots || not (M.is_empty !errors)
-                                 && !t.roots =|= error_nodes ()) then
+      let run_seq_command todo n = function
+        | Done r ->
+          loop (nslots + 1) (M.remove n running) todo (M.add n r results)
+        | Run (x,(cmd,args)) ->
+          let p = OpamProcess.run_background cmd args in
+          loop nslots (M.add n (p,x) !running) todo results
+      in
 
-        (* Nothing more to do *)
-        if M.is_empty !errors then
-          log "loop completed (without errors)"
-        else
-          raise (get_errors ())
+      if M.is_empty running && S.is_empty !t.roots then ()
+      else if nslots <= 0 || M.cardinal running = S.cardinal !t.roots then (
 
-      else if nslots <= 0 || (worker_nodes () ++ error_nodes ()) =|= !t.roots then (
-
-        (* if either 1/ no slots are available or 2/ no action can be performed,
-           then wait for a child process to finish its work *)
+        (* if either 1/ no slots are available or 2/ no action can be
+           performed, then wait for a child process to finish its work *)
         log "waiting for a child process to finish";
-        let pid, status =
-          try wait !pids
+        let processes = M.fold (fun n (p,x) acc -> p,(n,x)) !running [] in
+        let process,result =
+          let processes = List.map fst processes in
+          try OpamProcess.wait_one processes
           with e ->
-            OpamGlobals.error "%s"
-              (Printexc.to_string e);
+            OpamGlobals.error "%s" (Printexc.to_string e);
             (* Cleanup *)
-            errors := OpamMisc.IntMap.fold
-                (fun i (n,_) errors ->
-                   (try Unix.kill i Sys.sigint with _ -> ());
-                   M.add n (Internal_error "User interruption") errors)
-                !pids !errors;
-            (try OpamMisc.IntMap.iter (fun _ _ -> ignore (wait !pids)) !pids
-             with e -> log "%a in sub-process cleanup" (slog Printexc.to_string) e);
+            let errors =
+              List.fold_left (fun p ->
+                  M.add n (Internal_error "User interruption") errors;
+                  try Unix.kill p.OpamProcess.p_pid Sys.sigint with _ -> ()
+                ) errors processes;
+            (try
+               List.iter (fun _ _ -> ignore (OpamProcess.wait_one processes))
+                 processes
+             with e -> log "%a in sub-process cleanup"
+                         (slog Printexc.to_string) e);
             raise (get_errors ())
         in
-        let n, from_child = OpamMisc.IntMap.find pid !pids in
-        pids := OpamMisc.IntMap.remove pid !pids;
-        begin match status with
-          | Unix.WEXITED 0 ->
-            t := visit !t n;
-            (* we execute the 'post' function of the parent process *)
-            post n
-          | _ ->
-            let from_child = from_child () in
-            let error = read_error from_child in
-            errors := M.add n error !errors
-        end;
-        loop (nslots + 1)
+        let n,x = List.assoc process processes in
+        run_seq_command (post_command x result)
       ) else (
 
         (* otherwise, if the todo list is empty, then refill it *)
@@ -279,44 +265,16 @@ module Make (G : G) : SIG with module G = G
         let n = S.choose !todo in
         todo := S.remove n !todo;
 
-        (* Set-up a channel from the child to the parent *)
-        let error_file = OpamSystem.temp_file "error" in
+        (* (\* Set-up a channel from the child to the parent *\) *)
+        (* let error_file = OpamSystem.temp_file "error" in *)
 
         (* We execute the 'pre' function before the fork *)
-        pre n;
-
-        match Unix.fork () with
-        | -1  -> OpamGlobals.error_and_exit "Cannot fork a new process"
-        | 0   ->
-          log "Spawning a new process";
-          Sys.catch_break false;
-          let return p =
-            let to_parent = open_out_bin error_file in
-            write_error to_parent p;
-            exit 1 in
-          begin
-            (* the 'child' function is executed on the child *)
-            try child n; log "OK"; exit 0
-            with
-            | OpamSystem.Process_error p  -> return (Process_error p)
-            | OpamSystem.Internal_error s -> return (Internal_error s)
-            | OpamGlobals.Package_error s -> return (Package_error s)
-            | e ->
-              let b = OpamMisc.pretty_backtrace e in
-              let e = Printexc.to_string e in
-              let error =
-                if b = ""
-                then e
-                else e ^ "\n" ^ b in
-              return (Internal_error error)
-          end
-        | pid ->
-          log "Creating process %d" pid;
-          let from_child () = open_in_bin error_file in
-          pids := OpamMisc.IntMap.add pid (n, from_child) !pids;
-          loop (nslots - 1)
+        let pred = G.pred g n in
+        let pred = List.map (fun n -> n, M.assoc n !results) in
+        run_seq_command (command ~pred n)
       ) in
-    loop n
+    loop jobs;
+    
 
   let map_reduce jobs g ~map ~merge ~init =
     let files = ref [] in
@@ -353,8 +311,8 @@ module Make (G : G) : SIG with module G = G
     in
 
     try
-      iter jobs g ~pre ~child ~post;
-      !acc
+      ignore (iter jobs g ~pre ~child ~post);
+      !acc, 0
     with
     | Errors (errors,_) ->
       let string_of_error = function
@@ -374,24 +332,24 @@ module Make (G : G) : SIG with module G = G
     g
 
   let map_reduce_l jobs list ~map ~merge ~init = match list with
-    | []    -> init
-    | [elt] -> merge (map elt) init
+    | []    -> init, 0
+    | [elt] -> merge (map elt) init, 0
     | _     ->
       if jobs = 1 then
-        List.fold_left (fun acc repo -> merge (map repo) acc) init list
+        List.fold_left (fun acc repo -> merge (map repo) acc) init list, 0
       else
         let g = create list in
         map_reduce jobs g ~map ~merge ~init
 
   let iter_l jobs list ~pre ~child ~post = match list with
-    | []    -> ()
-    | [elt] -> pre elt; child elt; post elt
+    | []    -> 0
+    | [elt] -> pre elt; child elt; post elt; 0
     | list  ->
       if jobs = 1 then
-        List.iter (fun elt -> pre elt; child elt; post elt) list
+        (List.iter (fun elt -> pre elt; child elt; post elt) list; 0)
       else
         let g = create list in
-        iter jobs g ~pre ~post ~child
+        iter jobs g ~pre ~post ~child; 0
 
 end
 
