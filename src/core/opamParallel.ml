@@ -184,39 +184,27 @@ module Make (G : G) : SIG with module G = G
     close_in ic;
     r
 *)
-  let map ~jobs ~command ~post_command g =
-    let t = ref (init g) in
-    (* node -> OpamProcess.t * 'a *)
-    let running = ref M.empty in
-    (* The nodes to process *)
-    let todo = ref (!t.roots) in
-    (* The computed results *)
-    let results = ref M.empty in
 
-    (* All the node with a current worker currently doing some processing. *)
-    let worker_nodes () = S.of_list (M.keys !running) in
+  (* Returns a map (node -> return value) *)
+  let map ~jobs ~command ~post_command g =
+    let t = init g in
 
     log "Iterate over %a task(s) with %d process(es)"
       (slog @@ G.nb_vertex @> string_of_int) g n;
 
-    if G.has_cycle !t.graph then (
-      let sccs = G.scc_list !t.graph in
+    if G.has_cycle t.graph then (
+      let sccs = G.scc_list t.graph in
       let sccs = List.filter (function _::_::_ -> true | _ -> false) sccs in
       raise (Cyclic sccs)
     );
 
-    let get_errors errors =
-      (* Generate the remaining nodes in topological order *)
-      let remaining =
-        G.fold_vertex (fun v l ->
-            if S.mem v !t.visited || M.mem v errors then l
-            else v::l
-          ) !t.graph [] in
-      Errors (M.bindings errors, List.rev remaining) in
-
     (* nslots is the number of free slots *)
-    let rec loop nslots running todo results =
-
+    let rec loop
+        (nslots: int) (* number of free slots *)
+        (running: (OpamProcess.t * 'a) M.t)
+        (todo: S.t)
+        (results: 'b M.t)
+      =
       let run_seq_command todo n = function
         | Done r ->
           loop (nslots + 1) (M.remove n running) todo (M.add n r results)
@@ -225,56 +213,65 @@ module Make (G : G) : SIG with module G = G
           loop nslots (M.add n (p,x) !running) todo results
       in
 
-      if M.is_empty running && S.is_empty !t.roots then ()
-      else if nslots <= 0 || M.cardinal running = S.cardinal !t.roots then (
+      let fail node error =
+        OpamGlobals.error "%s" (Printexc.to_string error);
+        (* Cleanup *)
+        let errors =
+          M.map (fun n (p,_) ->
+              (try Unix.kill p.OpamProcess.p_pid Sys.sigint with _ -> ());
+              Internal_error "User interruption")
+            running
+        in
+        (try
+           List.iter (fun _ _ -> ignore (OpamProcess.wait_one processes))
+             processes
+         with e -> log "%a in sub-process cleanup"
+                     (slog Printexc.to_string) e);
+        (* Generate the remaining nodes in topological order *)
+        let remaining =
+          G.fold_vertex (fun v l ->
+              if S.mem v !t.visited || M.mem v errors then l
+              else v::l
+            ) !t.graph [] in
+        raise (Errors (M.bindings errors, List.rev remaining))
+      in
+
+      if M.is_empty running && S.is_empty t.roots then
+        results
+      else if nslots <= 0 || M.cardinal running = S.cardinal t.roots then (
 
         (* if either 1/ no slots are available or 2/ no action can be
            performed, then wait for a child process to finish its work *)
         log "waiting for a child process to finish";
         let processes = M.fold (fun n (p,x) acc -> p,(n,x)) !running [] in
         let process,result =
-          let processes = List.map fst processes in
-          try OpamProcess.wait_one processes
-          with e ->
-            OpamGlobals.error "%s" (Printexc.to_string e);
-            (* Cleanup *)
-            let errors =
-              List.fold_left (fun p ->
-                  M.add n (Internal_error "User interruption") errors;
-                  try Unix.kill p.OpamProcess.p_pid Sys.sigint with _ -> ()
-                ) errors processes;
-            (try
-               List.iter (fun _ _ -> ignore (OpamProcess.wait_one processes))
-                 processes
-             with e -> log "%a in sub-process cleanup"
-                         (slog Printexc.to_string) e);
-            raise (get_errors ())
+          try OpamProcess.wait_one (List.map fst processes)
+          with e -> fail n e
         in
         let n,x = List.assoc process processes in
-        run_seq_command (post_command x result)
+        let next = try post_command x result with e -> fail n e in
+        run_seq_command todo next
       ) else (
 
         (* otherwise, if the todo list is empty, then refill it *)
-        if S.is_empty !todo then (
-          log "refilling the TODO list";
-          todo := !t.roots -- worker_nodes () -- error_nodes ();
-        );
+        let todo =
+          if S.is_empty todo then (
+            log "refilling the TODO list";
+            t.roots -- S.of_list (M.keys !running);
+          ) else todo
+        in
 
         (* finally, if the todo list contains at least a node action,
            then simply process it *)
-        let n = S.choose !todo in
-        todo := S.remove n !todo;
+        let n = S.choose todo in
+        let todo = S.remove n todo in
 
-        (* (\* Set-up a channel from the child to the parent *\) *)
-        (* let error_file = OpamSystem.temp_file "error" in *)
-
-        (* We execute the 'pre' function before the fork *)
         let pred = G.pred g n in
-        let pred = List.map (fun n -> n, M.assoc n !results) in
-        run_seq_command (command ~pred n)
+        let pred = List.map (fun n -> n, M.assoc n results) in
+        let next = try command pred n with e -> fail n e in
+        run_seq_command todo next
       ) in
-    loop jobs;
-    
+    loop jobs M.empty t.roots M.empty
 
   let map_reduce jobs g ~map ~merge ~init =
     let files = ref [] in

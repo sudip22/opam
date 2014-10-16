@@ -30,7 +30,6 @@ type error =
 module type SIG = sig
 
   module G : G
-  module P : P
 
   val iter: int -> G.t ->
     pre:(G.V.t -> unit) ->
