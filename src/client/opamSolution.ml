@@ -137,13 +137,9 @@ let display_error (n, error) =
     let disp =
       OpamGlobals.header_error "while %s %s" action (OpamPackage.to_string nv) in
     match error with
-    | OpamParallel.Process_error r  ->
-      disp "%s" (OpamProcess.string_of_result ~color:`red r)
-    | OpamParallel.Internal_error "User interruption" -> ()
-    | OpamParallel.Internal_error s ->
-      disp "Internal error:\n  %s" s
-    | OpamParallel.Package_error s ->
-      disp "%s" s in
+    | OpamSystem.Internal_error "User interruption" -> ()
+    | e -> disp "%s" (Printexc.to_string e)
+  in
   match n with
   | To_change (Some o, nv) ->
     if
@@ -252,22 +248,22 @@ let output_json_solution solution =
 let output_json_actions action_errors =
   let open OpamParallel in
   let open OpamProcess in
-  let json_error = function
-    | Process_error r ->
-      `O [ ("process-error",
-            `O [ ("code", `String (string_of_int r.r_code));
-                 ("duration", `Float r.r_duration);
-                 ("info", `O (List.map (fun (k,v) -> (k, `String v)) r.r_info));
-                 ("stdout", `A (List.map (fun s -> `String s) r.r_stdout));
-                 ("stderr", `A (List.map (fun s -> `String s) r.r_stderr));
-               ])]
-    | Internal_error s ->
-      `O [ ("internal-error", `String s) ]
-    | Package_error s ->
-      `O [ ("package-error", `String s) ] in
+  (* let json_error = function *)
+  (*   | Process_error r -> *)
+  (*     `O [ ("process-error", *)
+  (*           `O [ ("code", `String (string_of_int r.r_code)); *)
+  (*                ("duration", `Float r.r_duration); *)
+  (*                ("info", `O (List.map (fun (k,v) -> (k, `String v)) r.r_info)); *)
+  (*                ("stdout", `A (List.map (fun s -> `String s) r.r_stdout)); *)
+  (*                ("stderr", `A (List.map (fun s -> `String s) r.r_stderr)); *)
+  (*              ])] *)
+  (*   | Internal_error s -> *)
+  (*     `O [ ("internal-error", `String s) ] *)
+  (*   | Package_error s -> *)
+  (*     `O [ ("package-error", `String s) ] in *)
   let json_action (a, e) =
     `O [ ("package", `String (OpamPackage.to_string (action_contents a)));
-         ("error"  ,  json_error e) ] in
+         (* ("error"  ,  json_error e) *) ] in
   List.iter (fun a ->
       let json = json_action a in
       OpamJson.add json

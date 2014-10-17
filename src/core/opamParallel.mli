@@ -14,60 +14,49 @@
 (*                                                                        *)
 (**************************************************************************)
 
-module type G = sig
-  include Graph.Sig.I
-  include Graph.Topological.G with type t := t and module V := V
-  val has_cycle: t -> bool
-  val scc_list: t -> V.t list list
-  val string_of_vertex: V.t -> string
+module type VERTEX = sig
+  include OpamMisc.OrderedType
+  include Graph.Sig.COMPARABLE with type t := t
 end
 
-type error =
-  | Process_error of OpamProcess.result
-  | Internal_error of string
-  | Package_error of string
+module type G = sig
+  include Graph.Sig.I
+  module Vertex: VERTEX with type t = V.t
+  module Topological: sig
+    val fold: (V.t -> 'a -> 'a) -> t -> 'a -> 'a
+  end
+  val has_cycle: t -> bool
+  val scc_list: t -> V.t list list
+end
+
+type ('a,'b) seq_command =
+  | Done of 'a
+  | Run of 'b * (string * string list)
 
 module type SIG = sig
 
   module G : G
 
-  val iter: int -> G.t ->
-    pre:(G.V.t -> unit) ->
-    child:(G.V.t -> unit) ->
-    post:(G.V.t -> unit) ->
-    int
+  val iter:
+    jobs:int ->
+    command:(pred:(G.V.t * 'a) list -> G.V.t -> ('a,'b) seq_command) ->
+    post_command:('b -> OpamProcess.result -> ('a,'b) seq_command) ->
+    G.t ->
+    unit
 
-  val iter_l: int -> G.vertex list ->
-    pre:(G.V.t -> unit) ->
-    child:(G.V.t -> unit) ->
-    post:(G.V.t -> unit) ->
-    int
+  val iter_l:
+    jobs:int ->
+    command:(pred:(G.V.t * 'a) list -> G.V.t -> ('a,'b) seq_command) ->
+    post_command:('b -> OpamProcess.result -> ('a,'b) seq_command) ->
+    G.V.t list ->
+    unit
 
-  val map_reduce: int -> G.t ->
-    map:(G.V.t -> 'a) ->
-    merge:('a -> 'a -> 'a) ->
-    init:'a ->
-    'a * int
-
-  val map_reduce_l: int -> G.vertex list ->
-    map:(G.V.t -> 'a) ->
-    merge:('a -> 'a -> 'a) ->
-    init:'a ->
-    'a * int
-
-  val create: G.V.t list -> G.t
-
-  exception Errors of (G.V.t * error) list * G.V.t list
+  exception Errors of (G.V.t * exn) list * G.V.t list
   exception Cyclic of G.V.t list list
 end
 
 module Make (G : G) : SIG with module G = G
                            and type G.V.t = G.V.t
-
-module type VERTEX = sig
-  include Graph.Sig.COMPARABLE
-  val to_string: t -> string
-end
 
 module type GRAPH = sig
   include Graph.Sig.I
@@ -81,4 +70,4 @@ module type GRAPH = sig
   module Dot : sig val output_graph : out_channel -> t -> unit end
 end
 
-module MakeGraph (V: VERTEX) : GRAPH with type V.t = V.t
+module MakeGraph (V: OpamMisc.OrderedType) : GRAPH with type V.t = V.t

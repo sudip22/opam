@@ -71,6 +71,9 @@ val run_background: ?env:string array -> ?verbose:bool -> ?name:string ->
 (** [wait p] waits for the processus [p] to end and returns its results. *)
 val wait: t -> result
 
+(** Like [wait], but returns None immediately if the process hasn't ended *)
+val dontwait: t -> result option
+
 (** Wait for the first of the listed processes to terminate, and return its
     termination status *)
 val wait_one: t list -> t * result

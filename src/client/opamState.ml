@@ -2576,15 +2576,12 @@ let update_dev_package t nv =
 
 let update_dev_packages t packages =
   log "update-dev-packages";
-  let packages = OpamPackage.Set.elements packages in
   let updates =
-    OpamPackage.Parallel.map_reduce_l 1 packages
-      ~map:(fun nv -> if update_dev_package t nv
-             then OpamPackage.Set.singleton nv
-             else OpamPackage.Set.empty)
-      ~merge:OpamPackage.Set.union
-      ~init:OpamPackage.Set.empty in
-
+    Set.fold (fun nv set ->
+        if update_dev_package t nv then OpamPackage.Set.add nv set
+        else set)
+      packages Set.empty
+  in
   let global =
     OpamPackage.Set.of_list (OpamPackage.Map.keys (global_dev_packages t)) in
   add_to_reinstall t ~all:true (updates %% global);
