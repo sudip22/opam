@@ -29,9 +29,12 @@ module type G = sig
   val scc_list: t -> V.t list list
 end
 
-type ('a,'b) seq_command =
+type command = string * string list
+type command_result = OpamProcess.result
+
+type 'a job =
   | Done of 'a
-  | Run of 'b * (string * string list)
+  | Run of command * (command_result -> 'a job)
 
 module type SIG = sig
 
@@ -39,15 +42,13 @@ module type SIG = sig
 
   val iter:
     jobs:int ->
-    command:(pred:(G.V.t * 'a) list -> G.V.t -> ('a,'b) seq_command) ->
-    post_command:('b -> OpamProcess.result -> ('a,'b) seq_command) ->
+    command:(pred:(G.V.t * 'a) list -> G.V.t -> 'a job) ->
     G.t ->
     unit
 
   val iter_l:
     jobs:int ->
-    command:(pred:(G.V.t * 'a) list -> G.V.t -> ('a,'b) seq_command) ->
-    post_command:('b -> OpamProcess.result -> ('a,'b) seq_command) ->
+    command:(pred:(G.V.t * 'a) list -> G.V.t -> 'a job) ->
     G.V.t list ->
     unit
 

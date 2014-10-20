@@ -371,9 +371,11 @@ let parallel_apply t action solution =
         OpamPackage.Set.iter (fun nv -> PackageGraph.add_vertex g nv)
           sources_needed;
         g in
-      PackageGraph.Parallel.iter (OpamState.dl_jobs t) dl_graph
-        ~pre:ignore ~post:ignore
-        ~child:(OpamAction.download_package t);
+      PackageGraph.Parallel.iter
+        ~jobs:(OpamState.dl_jobs t)
+        ~command:
+        ~child:(OpamAction.download_package t)
+        dl_graph;
       `Successful (), finalize
     with
     | PackageGraph.Parallel.Errors (errors, _) ->

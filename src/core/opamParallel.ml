@@ -34,9 +34,12 @@ module type G = sig
   val scc_list: t -> V.t list list
 end
 
-type ('a,'b) seq_command =
+type command = string * string list
+type command_result = OpamProcess.result
+
+type 'a job =
   | Done of 'a
-  | Run of 'b * (string * string list)
+  | Run of command * (command_result -> 'a job)
 
 module type SIG = sig
 
@@ -44,15 +47,13 @@ module type SIG = sig
 
   val iter:
     jobs:int ->
-    command:(pred:(G.V.t * 'a) list -> G.V.t -> ('a,'b) seq_command) ->
-    post_command:('b -> OpamProcess.result -> ('a,'b) seq_command) ->
+    command:(pred:(G.V.t * 'a) list -> G.V.t -> 'a job) ->
     G.t ->
     unit
 
   val iter_l:
     jobs:int ->
-    command:(pred:(G.V.t * 'a) list -> G.V.t -> ('a,'b) seq_command) ->
-    post_command:('b -> OpamProcess.result -> ('a,'b) seq_command) ->
+    command:(pred:(G.V.t * 'a) list -> G.V.t -> 'a job) ->
     G.V.t list ->
     unit
 
@@ -75,7 +76,7 @@ module Make (G : G) : SIG with module G = G
   open S.Op
 
   (* Returns a map (node -> return value) *)
-  let map ~jobs ~command ~post_command g =
+  let map ~jobs ~command g =
     log "Iterate over %a task(s) with %d process(es)"
       (slog @@ G.nb_vertex @> string_of_int) g jobs;
 
@@ -103,11 +104,11 @@ module Make (G : G) : SIG with module G = G
               (G.succ g n)
           in
           loop (nslots + 1) results running (ready ++ S.of_list new_ready)
-        | Run (x,(cmd,args)) ->
+        | Run ((cmd,args), cont) ->
           log "Next task in job %a: %a" (slog (string_of_int @* V.hash)) n
             (slog (String.concat " ")) (cmd::args);
           let p = OpamProcess.run_background cmd args in
-          let running = M.add n (p,x) running in
+          let running = M.add n (p,cont) running in
           loop nslots results running ready
       in
 
@@ -118,7 +119,7 @@ module Make (G : G) : SIG with module G = G
         OpamGlobals.error "%s" (Printexc.to_string error);
         (* Cleanup *)
         let errors,pend =
-          M.fold (fun n (p,x) (errors,pend) ->
+          M.fold (fun n (p,cont) (errors,pend) ->
               try
                 match OpamProcess.dontwait p with
                 | None -> (* process still running *)
@@ -127,7 +128,7 @@ module Make (G : G) : SIG with module G = G
                   (n,OpamSystem.Internal_error "User interruption") :: errors,
                   p::pend
                 | Some result ->
-                  match post_command x result with
+                  match cont result with
                   | Done _ -> errors, pend
                   | Run _ ->
                     (n,OpamSystem.Internal_error "User interruption") :: errors,
@@ -169,9 +170,9 @@ module Make (G : G) : SIG with module G = G
           | _ -> OpamProcess.wait_one (List.map fst processes)
         with e -> fail (fst (snd (List.hd processes))) e
       in
-      let n,x = List.assoc process processes in
+      let n,cont = List.assoc process processes in
       log "Collected task for job %a" (slog (string_of_int @* V.hash)) n;
-      let next = try post_command x result with e -> fail n e in
+      let next = try cont result with e -> fail n e in
       run_seq_command ready n next
     in
     let roots =
@@ -181,16 +182,16 @@ module Make (G : G) : SIG with module G = G
     in
     loop jobs M.empty M.empty roots
 
-  let iter ~jobs ~command ~post_command g =
-    ignore (map ~jobs ~command ~post_command g)
+  let iter ~jobs ~command g =
+    ignore (map ~jobs ~command g)
 
   let flat_graph_of_list l =
     let g = G.create () in
     List.iter (G.add_vertex g) l;
     g
 
-  let iter_l ~jobs ~command ~post_command l =
-    iter ~jobs ~command ~post_command (flat_graph_of_list l)
+  let iter_l ~jobs ~command l =
+    iter ~jobs ~command (flat_graph_of_list l)
 
 end
 
@@ -237,3 +238,4 @@ module MakeGraph (X: OpamMisc.OrderedType) : GRAPH with type V.t = X.t
   include PG
   include Graph.Oper.I (PG)
 end
+
