@@ -34,12 +34,27 @@ module type G = sig
   val scc_list: t -> V.t list list
 end
 
-type command = string * string list
-type command_result = OpamProcess.result
+type command = {
+  cmd: string;
+  args: string list;
+  cmd_text: string option;
+  cmd_dir: OpamFilename.Dir.t option;
+  cmd_env: string array option;
+  cmd_verbose: bool option;
+  cmd_name: string option;
+  cmd_metadata: (string * string) list option
+}
+
+let command ?env ?verbose ?name ?metadata ?dir ?text cmd args =
+  { cmd; args;
+    cmd_env=env; cmd_verbose=verbose; cmd_name=name; cmd_metadata=metadata;
+    cmd_dir=dir; cmd_text=text; }
+
+let string_of_command c = String.concat " " (c.cmd::c.args)
 
 type 'a job =
   | Done of 'a
-  | Run of command * (command_result -> 'a job)
+  | Run of command * (OpamProcess.result -> 'a job)
 
 module type SIG = sig
 
@@ -90,10 +105,10 @@ module Make (G : G) : SIG with module G = G
     let rec loop
         (nslots: int) (* number of free slots *)
         (results: 'b M.t)
-        (running: (OpamProcess.t * 'a) M.t)
+        (running: (OpamProcess.t * 'a * string option) M.t)
         (ready: S.t)
       =
-      let run_seq_command ready n = function
+      let run_seq_command nslots ready n = function
         | Done r ->
           log "Job %a finished" (slog (string_of_int @* V.hash)) n;
           let results = M.add n r results in
@@ -104,11 +119,25 @@ module Make (G : G) : SIG with module G = G
               (G.succ g n)
           in
           loop (nslots + 1) results running (ready ++ S.of_list new_ready)
-        | Run ((cmd,args), cont) ->
+        | Run (cmd, cont) ->
           log "Next task in job %a: %a" (slog (string_of_int @* V.hash)) n
-            (slog (String.concat " ")) (cmd::args);
-          let p = OpamProcess.run_background cmd args in
-          let running = M.add n (p,cont) running in
+            (slog (String.concat " ")) (cmd.cmd::cmd.args);
+          let run_process () =
+            OpamProcess.run_background
+              ?env:cmd.cmd_env ?verbose:cmd.cmd_verbose ?name:cmd.cmd_name
+              ?metadata:cmd.cmd_metadata
+              ~allow_stdin:false (* bad idea in parallel ! *)
+              cmd.cmd cmd.args
+          in
+          let p = match cmd.cmd_dir with
+            | None -> run_process ()
+            | Some dir -> OpamFilename.in_dir dir run_process
+          in
+          let running = M.add n (p,cont,cmd.cmd_text) running in
+          OpamGlobals.msg "%s\r" (String.concat " "
+                                    (OpamMisc.filter_map (fun (_,_,t) -> t)
+                                       (M.values running)));
+          print_string "[K;";
           loop nslots results running ready
       in
 
@@ -119,7 +148,7 @@ module Make (G : G) : SIG with module G = G
         OpamGlobals.error "%s" (Printexc.to_string error);
         (* Cleanup *)
         let errors,pend =
-          M.fold (fun n (p,cont) (errors,pend) ->
+          M.fold (fun n (p,cont,_text) (errors,pend) ->
               try
                 match OpamProcess.dontwait p with
                 | None -> (* process still running *)
@@ -163,7 +192,7 @@ module Make (G : G) : SIG with module G = G
         run_seq_command (S.remove n ready) n cmd
       else
       (* Wait for a process to end *)
-      let processes = M.fold (fun n (p,x) acc -> (p,(n,x)) :: acc) running [] in
+      let processes = M.fold (fun n (p,x,_) acc -> (p,(n,x)) :: acc) running [] in
       let process,result =
         try match List.map fst processes with
           | [p] -> p, OpamProcess.wait p
@@ -172,7 +201,11 @@ module Make (G : G) : SIG with module G = G
       in
       let n,cont = List.assoc process processes in
       log "Collected task for job %a" (slog (string_of_int @* V.hash)) n;
-      let next = try cont result with e -> fail n e in
+      let next =
+        try cont result with e ->
+          OpamProcess.cleanup result;
+          fail n e in
+      OpamProcess.cleanup result;
       run_seq_command ready n next
     in
     let roots =
@@ -239,3 +272,38 @@ module MakeGraph (X: OpamMisc.OrderedType) : GRAPH with type V.t = X.t
   include Graph.Oper.I (PG)
 end
 
+module Job = struct
+  (* Parallelise shell commands *)
+  let (@@>) command f = Run (command, f)
+
+  let rec (@@+) job1 fjob2 = match job1 with
+    | Done x -> fjob2 x
+    | Run (cmd,cont) -> Run (cmd, fun r -> cont r @@+ fjob2)
+
+  let rec run = function
+    | Done x -> x
+    | Run (cmd,cont) ->
+      let run_process () =
+        OpamProcess.run
+          ?env:cmd.cmd_env ?verbose:cmd.cmd_verbose ?name:cmd.cmd_name
+          ?metadata:cmd.cmd_metadata
+          cmd.cmd cmd.args
+      in
+      let result = match cmd.cmd_dir with
+        | None -> run_process ()
+        | Some dir -> OpamFilename.in_dir dir run_process
+      in
+      run (cont result)
+
+  let rec dry_run = function
+    | Done x -> x
+    | Run (_command,cont) ->
+      let result = { OpamProcess.
+                     r_code = 0;
+                     r_duration = 0.;
+                     r_info = [];
+                     r_stdout = [];
+                     r_stderr = [];
+                     r_cleanup = []; }
+      in dry_run (cont result)
+end

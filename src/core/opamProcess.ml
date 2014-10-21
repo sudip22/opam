@@ -189,31 +189,6 @@ let run_background
   create ~env ?info_file ?env_file ?stdout_file ?stderr_file ~verbose ~metadata
     ?allow_stdin cmd args
 
-let wait p =
-  let rec iter () =
-    let _, status = Unix.waitpid [] p.p_pid in
-    match status with
-    | Unix.WEXITED code ->
-      let duration = Unix.gettimeofday () -. p.p_time in
-      let stdout = option_default [] (option_map read_lines p.p_stdout) in
-      let stderr = option_default [] (option_map read_lines p.p_stderr) in
-      let cleanup =
-        OpamMisc.filter_map (fun x -> x) [ p.p_info; p.p_env; p.p_stderr; p.p_stdout ]
-      in
-      let info =
-        make_info ~code ~cmd:p.p_name ~args:p.p_args ~cwd:p.p_cwd ~metadata:p.p_metadata
-          ~env_file:p.p_env ~stdout_file:p.p_stdout ~stderr_file:p.p_stderr () in
-      {
-        r_code     = code;
-        r_duration = duration;
-        r_info     = info;
-        r_stdout   = stdout;
-        r_stderr   = stderr;
-        r_cleanup  = cleanup;
-      }
-    | _ -> iter () in
-  iter ()
-
 let exit_status p code =
   let duration = Unix.gettimeofday () -. p.p_time in
   let stdout = option_default [] (option_map read_lines p.p_stdout) in
@@ -286,6 +261,9 @@ let safe_unlink f =
 
 let clean_files r =
   List.iter safe_unlink r.r_cleanup
+
+let cleanup ?(force=false) r =
+  if not !OpamGlobals.debug || not force && is_failure r then clean_files r
 
 let truncate_str = "...[truncated]"
 

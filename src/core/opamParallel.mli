@@ -29,12 +29,18 @@ module type G = sig
   val scc_list: t -> V.t list list
 end
 
-type command = string * string list
-type command_result = OpamProcess.result
+type command
+val command:
+  ?env:string array -> ?verbose:bool -> ?name:string ->
+  ?metadata:(string*string) list -> ?dir:OpamFilename.Dir.t ->
+  ?text:string ->
+  string -> string list -> command
+
+val string_of_command: command -> string
 
 type 'a job =
   | Done of 'a
-  | Run of command * (command_result -> 'a job)
+  | Run of command * (OpamProcess.result -> 'a job)
 
 module type SIG = sig
 
@@ -72,3 +78,26 @@ module type GRAPH = sig
 end
 
 module MakeGraph (V: OpamMisc.OrderedType) : GRAPH with type V.t = V.t
+
+(** Helper module to handle job-returning functions *)
+module Job: sig
+  (** Stage a shell command with its continuation, eg:
+      {[
+        command "ls" ["-a"] @@> fun result ->
+        if OpamProcess.is_success result then Done result.r_stdout
+        else failwith "ls"
+      ]}
+  *)
+  val (@@>): command -> (OpamProcess.result -> 'a job) -> 'a job
+
+  (** [job1 @@+ fun r -> job2] appends the computation of tasks in [job2] after
+      [job1] *)
+  val (@@+): 'a job -> ('a -> 'b job) -> 'b job
+
+  (** Sequential run of a job *)
+  val run: 'a job -> 'a
+
+  (** Same as [run] but doesn't actually run any shell command,
+      and feed a dummy result to the cont. *)
+  val dry_run: 'a job -> 'a
+end

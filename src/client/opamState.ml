@@ -2577,10 +2577,10 @@ let update_dev_package t nv =
 let update_dev_packages t packages =
   log "update-dev-packages";
   let updates =
-    Set.fold (fun nv set ->
+    OpamPackage.Set.fold (fun nv set ->
         if update_dev_package t nv then OpamPackage.Set.add nv set
         else set)
-      packages Set.empty
+      packages OpamPackage.Set.empty
   in
   let global =
     OpamPackage.Set.of_list (OpamPackage.Map.keys (global_dev_packages t)) in

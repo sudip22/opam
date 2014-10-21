@@ -87,6 +87,11 @@ val is_failure : result -> bool
 (** Clean-up process result files *)
 val clean_files : result -> unit
 
+(** Should be called after process termination, to cleanup temporary files.
+    Leaves artefacts in case OpamGlobals.debug is on, or when the command fails
+    and force hasn't been set. *)
+val cleanup : ?force:bool -> result -> unit
+
 (** {2 Misc} *)
 val read_lines: string -> string list
 
