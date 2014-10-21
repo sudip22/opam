@@ -176,7 +176,7 @@ let read_lines f =
   with Sys_error _ -> []
 
 let run_background
-    ?env ?(verbose=false) ?name ?(metadata=[]) ?allow_stdin
+    ?env ?(verbose= !OpamGlobals.verbose) ?name ?(metadata=[]) ?allow_stdin
     cmd args =
   let file f = match name with
     | None   -> None

@@ -36,7 +36,7 @@ let install_package t nv =
   let build_dir = OpamPath.Switch.build t.root t.switch nv in
   if OpamFilename.exists_dir build_dir then OpamFilename.in_dir build_dir (fun () ->
 
-      OpamGlobals.msg "Installing %s.\n" (OpamPackage.to_string nv);
+      log "Installing %s.\n" (OpamPackage.to_string nv);
       let name = OpamPackage.name nv in
       let config_f = OpamPath.Switch.build_config t.root t.switch nv in
       let config = OpamFile.Dot_config.safe_read config_f in
@@ -583,6 +583,7 @@ let build_and_install_package_aux t ~metadata:save_meta nv =
         let t = update_metadata t ~installed ~installed_roots ~reinstall in
         OpamState.install_metadata t nv;
       );
+      OpamGlobals.msg "%s installed\n" (OpamGlobals.colorise `bold name);
       Done true
   in
   if !OpamGlobals.dryrun then

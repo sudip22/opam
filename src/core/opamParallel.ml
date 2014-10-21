@@ -101,6 +101,14 @@ module Make (G : G) : SIG with module G = G
       raise (Cyclic sccs)
     );
 
+    let print_status (running: (OpamProcess.t * 'a * string option) M.t) =
+      let texts =
+        OpamMisc.filter_map (fun (_,_,t) -> t) (M.values running) in
+      if texts <> [] then
+        (OpamGlobals.msg "\r[KRunning: %s\r" (String.concat " " texts);
+         print_string "[K")
+    in
+
     (* nslots is the number of free slots *)
     let rec loop
         (nslots: int) (* number of free slots *)
@@ -113,6 +121,7 @@ module Make (G : G) : SIG with module G = G
           log "Job %a finished" (slog (string_of_int @* V.hash)) n;
           let results = M.add n r results in
           let running = M.remove n running in
+          print_status running;
           let new_ready =
             List.filter
               (fun n -> List.for_all (fun n -> M.mem n results) (G.pred g n))
@@ -134,10 +143,7 @@ module Make (G : G) : SIG with module G = G
             | Some dir -> OpamFilename.in_dir dir run_process
           in
           let running = M.add n (p,cont,cmd.cmd_text) running in
-          OpamGlobals.msg "%s\r" (String.concat " "
-                                    (OpamMisc.filter_map (fun (_,_,t) -> t)
-                                       (M.values running)));
-          print_string "[K;";
+          print_status running;
           loop nslots results running ready
       in
 
@@ -189,7 +195,7 @@ module Make (G : G) : SIG with module G = G
         let pred = G.pred g n in
         let pred = List.map (fun n -> n, M.find n results) pred in
         let cmd = try command ~pred n with e -> fail n e in
-        run_seq_command (S.remove n ready) n cmd
+        run_seq_command (nslots - 1) (S.remove n ready) n cmd
       else
       (* Wait for a process to end *)
       let processes = M.fold (fun n (p,x,_) acc -> (p,(n,x)) :: acc) running [] in
@@ -206,7 +212,7 @@ module Make (G : G) : SIG with module G = G
           OpamProcess.cleanup result;
           fail n e in
       OpamProcess.cleanup result;
-      run_seq_command ready n next
+      run_seq_command nslots ready n next
     in
     let roots =
       G.fold_vertex
