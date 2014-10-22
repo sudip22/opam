@@ -17,6 +17,7 @@
 open OpamTypes
 open OpamTypesBase
 open OpamMisc.OP
+open OpamParallel.Job.Op
 open OpamFilename.OP
 open OpamPackage.Set.Op
 
@@ -24,11 +25,11 @@ let log fmt = OpamGlobals.log "STATE" fmt
 let slog = OpamGlobals.slog
 
 let () =
-  OpamHTTP.register ();
-  OpamGit.register ();
-  OpamDarcs.register();
-  OpamLocal.register ();
-  OpamHg.register ()
+  OpamHTTP.register ()(* ; *)
+  (* OpamGit.register (); *)
+  (* OpamDarcs.register(); *)
+  (* OpamLocal.register (); *)
+  (* OpamHg.register () *)
 
 let switch_reinstall_hook = ref (fun _ -> assert false)
 
@@ -2364,22 +2365,31 @@ let install_compiler t ~quiet:_ switch compiler =
         let kind = OpamFile.Comp.kind comp in
         if kind = `local
         && Sys.file_exists (fst comp_src)
-        && Sys.is_directory (fst comp_src) then
+        && Sys.is_directory (fst comp_src)
+        then
           OpamFilename.link_dir
-            ~src:(OpamFilename.Dir.of_string (fst comp_src)) ~dst:build_dir
-        else OpamFilename.with_tmp_dir (fun download_dir ->
-            let result =
-              OpamRepository.pull_url kind (OpamPackage.of_string "compiler.get")
-                download_dir None [comp_src] in
-            match result with
-            | Not_available u -> OpamGlobals.error_and_exit "%s is not available." u
-            | Up_to_date r
-            | Result r        -> OpamFilename.extract_generic_file r build_dir
-          );
+            ~src:(OpamFilename.Dir.of_string (fst comp_src))
+            ~dst:build_dir
+        else
+          OpamParallel.Job.run @@
+          OpamFilename.with_tmp_dir_job (fun download_dir ->
+              OpamRepository.pull_url kind
+                (OpamPackage.of_string "compiler.get")
+                download_dir None [comp_src]
+              @@+ function
+              | Not_available u ->
+                OpamGlobals.error_and_exit "%s is not available." u
+              | Up_to_date r | Result r ->
+                Done (OpamFilename.extract_generic_file r build_dir)
+            );
         let patches = OpamFile.Comp.patches comp in
-        let patches = List.map (fun f ->
-            OpamFilename.download ~overwrite:true f build_dir
-          ) patches in
+        let patches =
+          OpamParallel.map
+            ~jobs:!OpamGlobals.dl_jobs
+            ~command:(fun f ->
+                OpamFilename.download ~overwrite:true f build_dir)
+            patches
+        in
         List.iter (fun f -> OpamFilename.patch f build_dir) patches;
         OpamGlobals.msg "Now compiling OCaml. This may take a while, \
                          please bear with us...\n";

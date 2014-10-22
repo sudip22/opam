@@ -221,6 +221,11 @@ let with_tmp_dir fn =
     remove_dir dir;
     raise e
 
+let temp_dir () =
+  let dir = mk_temp_dir () in
+  mkdir dir;
+  dir, fun () -> remove_dir dir
+
 let remove file =
   if Sys.file_exists file && Sys2.is_directory file then
     remove_dir file
@@ -592,32 +597,37 @@ let system_ocamlc_where = system [ "ocamlc"; "-where" ]
 
 let system_ocamlc_version = system [ "ocamlc"; "-version" ]
 
+open OpamParallel.Job.Op
+
 let download_command =
   let retry = string_of_int OpamGlobals.download_retry in
-  let wget ~compress:_ src =
-    let wget = [
-      "wget";
+  let wget ~compress:_ dir src =
+    let wget_args = [
       "--content-disposition"; "--no-check-certificate";
       "-t"; retry;
       src
     ] in
-    command wget in
-  let curl command ~compress src =
-    let curl = [
-      command;
+    OpamParallel.command ~dir "wget" wget_args @@> fun r ->
+    if OpamProcess.is_failure r then process_error r
+    else Done ()
+  in
+  let curl command ~compress dir src =
+    let curl_args = [
       "--write-out"; "%{http_code}\\n"; "--insecure";
       "--retry"; retry; "--retry-delay"; "2";
     ] @ (if compress then ["--compressed"] else []) @ [
         "-OL"; src
     ] in
-    match read_command_output curl with
+    OpamParallel.command ~dir command curl_args @@> fun r ->
+    match r.OpamProcess.r_stdout with
     | [] -> internal_error "curl: empty response while downloading %s" src
     | l  ->
       let code = List.hd (List.rev l) in
-      try if int_of_string code >= 400 then raise Exit
+      try if int_of_string code >= 400 then raise Exit else Done ()
       with e ->
         OpamMisc.fatal e;
-        internal_error "curl: code %s while downloading %s" code src in
+        internal_error "curl: code %s while downloading %s" code src
+  in
   lazy (
     match OpamGlobals.curl_command with
     | Some cmd -> curl cmd
@@ -632,21 +642,22 @@ let download_command =
 
 let really_download ~overwrite ?(compress=false) ~src ~dst =
   let download = (Lazy.force download_command) in
-  let aux () =
-    download ~compress src;
+  let aux dir =
+    download ~compress dir src @@+ fun () ->
     match list (fun _ -> true) "." with
       ( [] | _::_::_ ) ->
       internal_error "Too many downloaded files."
     | [filename] ->
       if not overwrite && Sys.file_exists dst then
         internal_error "The downloaded file will overwrite %s." dst;
-      commands [
-        [ "rm"; "-f"; dst ];
-        [ "mv"; filename; dst ];
-      ];
-      dst
+      OpamParallel.Job.of_list [
+        OpamParallel.command ~dir "rm" ["-f"; dst];
+        OpamParallel.command ~dir "mv" [filename; dst ];
+      ] @@+ function
+      | Some (_,err) -> process_error err
+      | None -> Done dst
   in
-  try with_tmp_dir (fun tmp_dir -> in_dir tmp_dir aux)
+  try with_tmp_dir (fun tmp_dir -> aux tmp_dir)
   with
   | Internal_error s as e -> OpamGlobals.error "%s" s; raise e
   | e ->
@@ -655,15 +666,16 @@ let really_download ~overwrite ?(compress=false) ~src ~dst =
 
 let download ~overwrite ?compress ~filename:src ~dst:dst =
   if dst = src then
-    dst
+    Done dst
   else if Sys.file_exists src then (
     if not overwrite && Sys.file_exists dst then
       internal_error "The downloaded file will overwrite %s." dst;
-    commands [
-      [ "rm"; "-f"; dst ];
-      [ "cp"; src; dst ]
-    ];
-    dst
+    OpamParallel.Job.of_list
+      [ OpamParallel.command "rm" ["-f"; dst];
+        OpamParallel.command "cp" [src; dst] ]
+    @@+ function
+    | None -> Done dst
+    | Some (_,err) -> process_error err
   ) else
     really_download ~overwrite ?compress ~src ~dst
 

@@ -73,7 +73,7 @@ let string_of_info ?(color=`yellow) info =
         (OpamGlobals.colorise color k) v) info;
   Buffer.contents b
 
-let create ?info_file ?env_file ?(allow_stdin=true) ?stdout_file ?stderr_file ?env ?(metadata=[])
+let create ?info_file ?env_file ?(allow_stdin=true) ?stdout_file ?stderr_file ?env ?(metadata=[]) ?dir
     ~verbose cmd args =
   let nothing () = () in
   let tee f =
@@ -88,6 +88,9 @@ let create ?info_file ?env_file ?(allow_stdin=true) ?stdout_file ?stderr_file ?e
       Unix.descr_of_out_channel chan, close
     ) else
       fd, close_fd in
+  let oldcwd = Sys.getcwd () in
+  let cwd = OpamMisc.Option.default oldcwd dir in
+  OpamMisc.Option.iter Unix.chdir dir;
   let stdin_fd =
     if allow_stdin then Unix.stdin else
       let fd = Unix.dup Unix.stdin in
@@ -103,7 +106,6 @@ let create ?info_file ?env_file ?(allow_stdin=true) ?stdout_file ?stderr_file ?e
     | None   -> Unix.environment ()
     | Some e -> e in
   let time = Unix.gettimeofday () in
-  let cwd = Sys.getcwd () in
 
   let () =
     (* write the env file before running the command*)
@@ -136,6 +138,7 @@ let create ?info_file ?env_file ?(allow_stdin=true) ?stdout_file ?stderr_file ?e
       stdin_fd stdout_fd stderr_fd in
   close_stdout ();
   close_stderr ();
+  Unix.chdir oldcwd;
   {
     p_name   = cmd;
     p_args   = args;
@@ -176,7 +179,7 @@ let read_lines f =
   with Sys_error _ -> []
 
 let run_background
-    ?env ?(verbose= !OpamGlobals.verbose) ?name ?(metadata=[]) ?allow_stdin
+    ?env ?(verbose= !OpamGlobals.verbose) ?name ?(metadata=[]) ?allow_stdin ?dir
     cmd args =
   let file f = match name with
     | None   -> None
@@ -187,7 +190,7 @@ let run_background
   let info_file   = file (Printf.sprintf "%s.info") in
   let env = match env with Some e -> e | None -> Unix.environment () in
   create ~env ?info_file ?env_file ?stdout_file ?stderr_file ~verbose ~metadata
-    ?allow_stdin cmd args
+    ?allow_stdin ?dir cmd args
 
 let exit_status p code =
   let duration = Unix.gettimeofday () -. p.p_time in
@@ -248,8 +251,10 @@ let wait_one processes =
     in
     aux ()
 
-let run ?env ?verbose ?name ?metadata ?allow_stdin cmd args =
-  let p = run_background ?env ?verbose ?name ?metadata ?allow_stdin cmd args in
+let run ?env ?verbose ?name ?metadata ?allow_stdin ?dir cmd args =
+  let p =
+    run_background ?env ?verbose ?name ?metadata ?allow_stdin ?dir
+      cmd args in
   wait p
 
 let is_success r = r.r_code = 0

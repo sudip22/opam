@@ -20,10 +20,6 @@ open OpamTypes
 open OpamTypesBase
 open OpamState.Types
 
-(* Graph of packages providing OpamParallel *)
-module PackageGraph : OpamParallel.GRAPH with type V.t = package
-  = OpamParallel.MakeGraph (OpamPackage)
-
 module PackageAction = OpamSolver.Action
 module PackageActionGraph = OpamSolver.ActionGraph
 
@@ -367,11 +363,11 @@ let parallel_apply t action solution =
       OpamPackage.Set.iter (OpamAction.download_package t) sources_needed;
 (*
       let dl_graph =
-        let g = PackageGraph.create () in
-        OpamPackage.Set.iter (fun nv -> PackageGraph.add_vertex g nv)
+        let g = OpamPackage.Graph.create () in
+        OpamPackage.Set.iter (fun nv -> OpamPackage.Graph.add_vertex g nv)
           sources_needed;
         g in
-      PackageGraph.Parallel.iter
+      OpamPackage.Graph.Parallel.iter
         ~jobs:(OpamState.dl_jobs t)
         ~command:
         ~child:(OpamAction.download_package t)
@@ -379,7 +375,7 @@ let parallel_apply t action solution =
 *)
       `Successful (), finalize
     with
-    | PackageGraph.Parallel.Errors (errors, _) ->
+    | OpamPackage.Graph.Parallel.Errors (errors, _) ->
       (* Error during download *)
       let msg =
         Printf.sprintf "Could not download archives of %s"

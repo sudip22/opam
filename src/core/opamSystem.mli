@@ -31,9 +31,11 @@ exception Internal_error of string
 (** Raise [Internal_error] *)
 val internal_error: ('a, unit, string, 'b) format4 -> 'a
 
-
 (** [with_tmp_dir fn] executes [fn] in a tempory directory *)
 val with_tmp_dir: (string -> 'a) -> 'a
+
+(** Returns a temporary directory and the function to clean it up *)
+val temp_dir: unit -> string * (unit -> unit)
 
 (** [copy src dst] copies [src] to [dst]. Remove [dst] before the copy
     if it is a link. *)
@@ -185,7 +187,7 @@ val funlock: lock -> unit
 
 (** download compiler sources *)
 val download: overwrite:bool -> ?compress:bool ->
-  filename:string -> dst:string -> string
+  filename:string -> dst:string -> string OpamParallel.job
 
 (** Apply a patch file in the current directory. *)
 val patch: string -> unit

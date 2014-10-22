@@ -21,6 +21,7 @@ open OpamTypes
 open OpamFilename.OP
 open OpamState.Types
 open OpamMisc.OP
+open OpamParallel.Job.Op
 
 module PackageActionGraph = OpamSolver.ActionGraph
 
@@ -560,19 +561,19 @@ let build_and_install_package_aux t ~metadata:save_meta nv =
            | a::_ -> " "^a)
       in
       (* OpamGlobals.msg "%s: %s\n" name (String.concat " " (cmd::args)); *)
-      OpamParallel.Job.(
-        OpamParallel.command ~env ~name ~metadata ~dir ~text cmd args
-        @@> fun result ->
-        if OpamProcess.is_success result then
-          run_commands commands
-        else (
-          OpamGlobals.error
-            "The compilation of %s failed at %s."
-            name (String.concat " " (cmd::args));
-          ignore @@
-          remove_package ~metadata:false t ~keep_build:true ~silent:true nv;
-          Done false
-        ))
+      let dir = OpamFilename.to_string dir in
+      OpamParallel.command ~env ~name ~metadata ~dir ~text cmd args
+      @@> fun result ->
+      if OpamProcess.is_success result then
+        run_commands commands
+      else (
+        OpamGlobals.error
+          "The compilation of %s failed at %s."
+          name (String.concat " " (cmd::args));
+        ignore @@
+        remove_package ~metadata:false t ~keep_build:true ~silent:true nv;
+        Done false
+      )
     | []::commands -> run_commands commands
     | [] ->
       install_package t nv;

@@ -40,7 +40,7 @@ type t = {
 val create :
   ?info_file:string -> ?env_file:string ->
   ?allow_stdin:bool -> ?stdout_file:string -> ?stderr_file:string ->
-  ?env:string array -> ?metadata:(string*string) list ->
+  ?env:string array -> ?metadata:(string*string) list -> ?dir:string ->
   verbose:bool -> string -> string list -> t
 
 (** Process results *)
@@ -59,13 +59,13 @@ type result = {
     created, and contains the process main description, the environment
     variables, the standard output and the standard error. *)
 val run : ?env:string array -> ?verbose:bool -> ?name:string ->
-  ?metadata:(string*string) list -> ?allow_stdin:bool ->
+  ?metadata:(string*string) list -> ?allow_stdin:bool -> ?dir:string ->
   string -> string list -> result
 
 (** Same as [run], but doesn't wait. Use wait_one to wait and collect
     results *)
 val run_background: ?env:string array -> ?verbose:bool -> ?name:string ->
-  ?metadata:(string*string) list -> ?allow_stdin:bool ->
+  ?metadata:(string*string) list -> ?allow_stdin:bool -> ?dir:string ->
   string -> string list -> t
 
 (** [wait p] waits for the processus [p] to end and returns its results. *)
