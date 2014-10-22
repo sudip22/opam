@@ -15,7 +15,7 @@
 (**************************************************************************)
 
 module Base = OpamMisc.Base
-open OpamParallel.Job.Op
+open OpamProcess.Job.Op
 
 let log fmt = OpamGlobals.log "FILENAME" fmt
 let slog = OpamGlobals.slog
@@ -47,10 +47,8 @@ let raw_dir s = s
 let with_tmp_dir fn =
   OpamSystem.with_tmp_dir (fun dir -> fn (Dir.of_string dir))
 
-let with_tmp_dir_job job =
-  let dir, cleanup = OpamSystem.temp_dir () in
-  (try job dir with e -> cleanup (); raise e)
-  @@+ fun r -> cleanup (); Done r
+let with_tmp_dir_job fjob =
+  OpamSystem.with_tmp_dir_job (fun dir -> fjob (Dir.of_string dir))
 
 let rmdir dirname =
   log "rmdir %a" (slog Dir.to_string) dirname;

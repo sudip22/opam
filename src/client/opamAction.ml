@@ -21,7 +21,7 @@ open OpamTypes
 open OpamFilename.OP
 open OpamState.Types
 open OpamMisc.OP
-open OpamParallel.Job.Op
+open OpamProcess.Job.Op
 
 module PackageActionGraph = OpamSolver.ActionGraph
 
@@ -201,20 +201,21 @@ let prepare_package_build t nv =
 let download_package t nv =
   log "download_package: %a" (slog OpamPackage.to_string) nv;
   let name = OpamPackage.name nv in
-  if !OpamGlobals.dryrun || !OpamGlobals.fake then () else
-  try match OpamPackage.Name.Map.find name t.pinned with
-    | Version _ ->
-      let dir = OpamPath.dev_package t.root nv in
-      ignore @@ OpamState.download_upstream t nv dir
-    | _ ->
-      let dir = OpamPath.Switch.dev_package t.root t.switch name in
-      ignore @@ OpamState.download_upstream t nv dir
-  with Not_found ->
-    match OpamState.download_archive t nv with
-    | Some f -> assert (f = OpamPath.archive t.root nv)
+  if !OpamGlobals.dryrun || !OpamGlobals.fake then Done () else
+  let dir =
+    try match OpamPackage.Name.Map.find name t.pinned with
+      | Version _ -> Some (OpamPath.dev_package t.root nv)
+      | _ -> Some (OpamPath.Switch.dev_package t.root t.switch name)
+    with Not_found -> None
+  in
+  match dir with
+  | Some dir -> OpamState.download_upstream t nv dir @@+ fun _ -> Done ()
+  | None ->
+    OpamState.download_archive t nv @@+ function
+    | Some f -> assert (f = OpamPath.archive t.root nv); Done ()
     | None ->
       let dir = OpamPath.dev_package t.root nv in
-      ignore (OpamState.download_upstream t nv dir)
+      OpamState.download_upstream t nv dir @@+ fun _ -> Done ()
 
 let extract_package t nv =
   log "extract_package: %a" (slog OpamPackage.to_string) nv;
@@ -561,8 +562,8 @@ let build_and_install_package_aux t ~metadata:save_meta nv =
            | a::_ -> " "^a)
       in
       (* OpamGlobals.msg "%s: %s\n" name (String.concat " " (cmd::args)); *)
-      let dir = OpamFilename.to_string dir in
-      OpamParallel.command ~env ~name ~metadata ~dir ~text cmd args
+      let dir = OpamFilename.Dir.to_string dir in
+      OpamProcess.command ~env ~name ~metadata ~dir ~text cmd args
       @@> fun result ->
       if OpamProcess.is_success result then
         run_commands commands
@@ -588,7 +589,7 @@ let build_and_install_package_aux t ~metadata:save_meta nv =
       Done true
   in
   if !OpamGlobals.dryrun then
-    Done (OpamParallel.Job.dry_run (run_commands commands))
+    Done (OpamProcess.Job.dry_run (run_commands commands))
   else
     run_commands commands
 
@@ -598,4 +599,4 @@ let build_and_install_package t ~metadata nv =
   else
     (OpamGlobals.msg "(simulation) Building and installing %s.\n"
        (OpamPackage.to_string nv);
-     OpamParallel.Done true)
+     Done true)

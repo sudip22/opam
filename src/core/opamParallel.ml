@@ -15,6 +15,7 @@
 (**************************************************************************)
 
 open OpamMisc.OP
+open OpamProcess.Job.Op
 
 let log fmt = OpamGlobals.log "PARALLEL" fmt
 let slog = OpamGlobals.slog
@@ -34,35 +35,13 @@ module type G = sig
   val scc_list: t -> V.t list list
 end
 
-type command = {
-  cmd: string;
-  args: string list;
-  cmd_text: string option;
-  cmd_dir: string option;
-  cmd_env: string array option;
-  cmd_verbose: bool option;
-  cmd_name: string option;
-  cmd_metadata: (string * string) list option;
-}
-
-let command ?env ?verbose ?name ?metadata ?dir ?text cmd args =
-  { cmd; args;
-    cmd_env=env; cmd_verbose=verbose; cmd_name=name; cmd_metadata=metadata;
-    cmd_dir=dir; cmd_text=text; }
-
-let string_of_command c = String.concat " " (c.cmd::c.args)
-
-type 'a job =
-  | Done of 'a
-  | Run of command * (OpamProcess.result -> 'a job)
-
 module type SIG = sig
 
   module G : G
 
   val iter:
     jobs:int ->
-    command:(pred:(G.V.t * 'a) list -> G.V.t -> 'a job) ->
+    command:(pred:(G.V.t * 'a) list -> G.V.t -> 'a OpamProcess.job) ->
     G.t ->
     unit
 
@@ -123,15 +102,11 @@ module Make (G : G) = struct
           loop (nslots + 1) results running (ready ++ S.of_list new_ready)
         | Run (cmd, cont) ->
           log "Next task in job %a: %a" (slog (string_of_int @* V.hash)) n
-            (slog (String.concat " ")) (cmd.cmd::cmd.args);
-          let p =
-            OpamProcess.run_background
-              ?env:cmd.cmd_env ?verbose:cmd.cmd_verbose ?name:cmd.cmd_name
-              ?metadata:cmd.cmd_metadata ?dir:cmd.cmd_dir
-              ~allow_stdin:false (* bad idea in parallel ! *)
-              cmd.cmd cmd.args
+            (slog OpamProcess.string_of_command) cmd;
+          let p = OpamProcess.run_background cmd in
+          let running =
+            M.add n (p, cont, OpamProcess.text_of_command cmd) running
           in
-          let running = M.add n (p,cont,cmd.cmd_text) running in
           print_status running;
           loop nslots results running ready
       in
@@ -187,7 +162,9 @@ module Make (G : G) = struct
         run_seq_command (nslots - 1) (S.remove n ready) n cmd
       else
       (* Wait for a process to end *)
-      let processes = M.fold (fun n (p,x,_) acc -> (p,(n,x)) :: acc) running [] in
+      let processes =
+        M.fold (fun n (p,x,_) acc -> (p,(n,x)) :: acc) running []
+      in
       let process,result =
         try match List.map fst processes with
           | [p] -> p, OpamProcess.wait p
@@ -296,60 +273,3 @@ let reduce ~jobs ~command ~merge ~nil l =
   let command ~pred:_ i = command a.(i) in
   let r = IntGraph.Parallel.map ~jobs ~command g in
   IntGraph.Parallel.M.fold (fun _ -> merge) r nil
-
-module Job = struct
-  type 'a t = 'a job =
-      | Done of 'a
-      | Run of command * (OpamProcess.result -> 'a job)
-
-  module Op = struct
-    type 'a job = 'a t =
-      | Done of 'a
-      | Run of command * (OpamProcess.result -> 'a job)
-
-    (* Parallelise shell commands *)
-    let (@@>) command f = Run (command, f)
-
-    let rec (@@+) job1 fjob2 = match job1 with
-      | Done x -> fjob2 x
-      | Run (cmd,cont) -> Run (cmd, fun r -> cont r @@+ fjob2)
-  end
-
-  let rec run = function
-    | Done x -> x
-    | Run (cmd,cont) ->
-      let result =
-        OpamProcess.run
-          ?env:cmd.cmd_env ?verbose:cmd.cmd_verbose ?name:cmd.cmd_name
-          ?metadata:cmd.cmd_metadata ?dir:cmd.cmd_dir
-          cmd.cmd cmd.args
-      in
-      run (cont result)
-
-  let rec dry_run = function
-    | Done x -> x
-    | Run (_command,cont) ->
-      let result = { OpamProcess.
-                     r_code = 0;
-                     r_duration = 0.;
-                     r_info = [];
-                     r_stdout = [];
-                     r_stderr = [];
-                     r_cleanup = []; }
-      in dry_run (cont result)
-
-  let of_list ?(keep_going=false) l =
-    let rec aux err = function
-      | [] -> Done err
-      | cmd::commands ->
-        let cont = fun r ->
-          if OpamProcess.is_success r then aux err commands
-          else if keep_going then
-            aux OpamMisc.Option.Op.(err ++ Some (cmd,r)) commands
-          else Done (Some (cmd,r))
-        in
-        Run (cmd,cont)
-    in
-    aux None l
-
-end

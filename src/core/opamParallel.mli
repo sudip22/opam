@@ -29,26 +29,13 @@ module type G = sig
   val scc_list: t -> V.t list list
 end
 
-type command
-val command:
-  ?env:string array -> ?verbose:bool -> ?name:string ->
-  ?metadata:(string*string) list -> ?dir:string ->
-  ?text:string ->
-  string -> string list -> command
-
-val string_of_command: command -> string
-
-type 'a job =
-  | Done of 'a
-  | Run of command * (OpamProcess.result -> 'a job)
-
 (** Simply parallel execution of tasks *)
 
-val iter: jobs:int -> command:('a -> unit job) -> 'a list -> unit
+val iter: jobs:int -> command:('a -> unit OpamProcess.job) -> 'a list -> unit
 
-val map: jobs:int -> command:('a -> 'b job) -> 'a list -> 'b list
+val map: jobs:int -> command:('a -> 'b OpamProcess.job) -> 'a list -> 'b list
 
-val reduce: jobs:int -> command:('a -> 'b job) ->
+val reduce: jobs:int -> command:('a -> 'b OpamProcess.job) ->
   merge:('b -> 'b -> 'b) -> nil:'b ->
   'a list -> 'b
 
@@ -60,7 +47,7 @@ module type SIG = sig
 
   val iter:
     jobs:int ->
-    command:(pred:(G.V.t * 'a) list -> G.V.t -> 'a job) ->
+    command:(pred:(G.V.t * 'a) list -> G.V.t -> 'a OpamProcess.job) ->
     G.t ->
     unit
 
@@ -84,44 +71,3 @@ module type GRAPH = sig
 end
 
 module MakeGraph (V: OpamMisc.OrderedType) : GRAPH with type V.t = V.t
-
-(** Helper module to handle job-returning functions *)
-module Job: sig
-  type 'a t = 'a job =
-      | Done of 'a
-      | Run of command * (OpamProcess.result -> 'a job)
-
-  module Op: sig
-    (** This module makes construction of job-returning functions easier when
-        open *)
-    type 'a job = 'a t =
-      | Done of 'a
-      | Run of command * (OpamProcess.result -> 'a job)
-
-    (** Stage a shell command with its continuation, eg:
-        {[
-          command "ls" ["-a"] @@> fun result ->
-          if OpamProcess.is_success result then Done result.r_stdout
-          else failwith "ls"
-        ]}
-    *)
-    val (@@>): command -> (OpamProcess.result -> 'a job) -> 'a job
-
-    (** [job1 @@+ fun r -> job2] appends the computation of tasks in [job2] after
-        [job1] *)
-    val (@@+): 'a job -> ('a -> 'b job) -> 'b job
-  end
-
-  (** Sequential run of a job *)
-  val run: 'a job -> 'a
-
-  (** Same as [run] but doesn't actually run any shell command,
-      and feed a dummy result to the cont. *)
-  val dry_run: 'a job -> 'a
-
-  (** Converts a list of commands into a job that returns None on success, or
-      the first failed command and its result.
-      Unless [keep_going] is true, stops on first error. *)
-  val of_list: ?keep_going:bool -> command list ->
-    (command * OpamProcess.result) option job
-end

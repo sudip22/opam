@@ -18,6 +18,7 @@ open OpamTypes
 open OpamTypesBase
 open OpamMisc.OP
 open OpamFilename.OP
+open OpamProcess.Job.Op
 
 let log fmt = OpamGlobals.log "REPOSITORY" fmt
 let slog = OpamGlobals.slog
@@ -75,10 +76,10 @@ module Set = OpamMisc.Set.Make(O)
 module Map = OpamMisc.Map.Make(O)
 
 module type BACKEND = sig
-  val pull_url: package -> dirname -> string option -> address -> generic_file download OpamParallel.job
-  val pull_repo: repository -> unit OpamParallel.job
-  val pull_archive: repository -> filename -> filename download OpamParallel.job
-  val revision: repository -> version option OpamParallel.job
+  val pull_url: package -> dirname -> string option -> address -> generic_file download OpamProcess.job
+  val pull_repo: repository -> unit OpamProcess.job
+  val pull_archive: repository -> filename -> filename download OpamProcess.job
+  val revision: repository -> version option OpamProcess.job
 end
 
 exception Unknown_backend
@@ -110,7 +111,7 @@ let init repo =
   OpamFilename.mkdir (OpamPath.Repository.compilers_dir repo);
   Done ()
 
-open OpamParallel.Job.Op
+open OpamProcess.Job.Op
 
 let pull_url kind package local_dirname checksum remote_url =
   if !OpamGlobals.req_checksums && checksum = None then

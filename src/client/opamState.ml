@@ -17,7 +17,7 @@
 open OpamTypes
 open OpamTypesBase
 open OpamMisc.OP
-open OpamParallel.Job.Op
+open OpamProcess.Job.Op
 open OpamFilename.OP
 open OpamPackage.Set.Op
 
@@ -2371,7 +2371,7 @@ let install_compiler t ~quiet:_ switch compiler =
             ~src:(OpamFilename.Dir.of_string (fst comp_src))
             ~dst:build_dir
         else
-          OpamParallel.Job.run @@
+          OpamProcess.Job.run @@
           OpamFilename.with_tmp_dir_job (fun download_dir ->
               OpamRepository.pull_url kind
                 (OpamPackage.of_string "compiler.get")
@@ -2385,7 +2385,7 @@ let install_compiler t ~quiet:_ switch compiler =
         let patches = OpamFile.Comp.patches comp in
         let patches =
           OpamParallel.map
-            ~jobs:!OpamGlobals.dl_jobs
+            ~jobs:(dl_jobs t)
             ~command:(fun f ->
                 OpamFilename.download ~overwrite:true f build_dir)
             patches
@@ -2455,7 +2455,10 @@ let update_dev_package t nv =
         (slog string_of_address) remote_url
         (slog string_of_repository_kind) kind;
       let checksum = OpamFile.URL.checksum url in
-      let r = OpamRepository.pull_url kind nv srcdir checksum mirrors in
+      let r =
+        OpamProcess.Job.run
+          (OpamRepository.pull_url kind nv srcdir checksum mirrors)
+      in
       match r with
       | Not_available u ->
         OpamGlobals.error "Upstream %s of %s is unavailable" u (OpamPackage.to_string nv);
@@ -2602,31 +2605,30 @@ let update_dev_packages t packages =
 let download_archive t nv =
   log "get_archive %a" (slog OpamPackage.to_string) nv;
   let dst = OpamPath.archive t.root nv in
-  if OpamFilename.exists dst then Some dst else
+  if OpamFilename.exists dst then Done (Some dst) else
   try
     let repo, _ = OpamPackage.Map.find nv t.package_index in
     let repo = find_repository t repo in
-    match OpamRepository.pull_archive repo nv with
-    | Not_available _ -> None
+    OpamRepository.pull_archive repo nv @@+ function
+    | Not_available _ -> Done None
     | Up_to_date f
-    | Result f        -> OpamFilename.copy ~src:f ~dst; Some dst
+    | Result f        -> OpamFilename.copy ~src:f ~dst; Done (Some dst)
   with Not_found ->
-    None
+    Done None
 
 (* Download a package from its upstream source, using 'cache_dir' as cache
    directory. *)
 let download_upstream t nv dirname =
   match url t nv with
-  | None   -> None
+  | None   -> Done None
   | Some u ->
     let remote_url = OpamFile.URL.url u in
     let mirrors = remote_url :: OpamFile.URL.mirrors u in
     let kind = OpamFile.URL.kind u in
     let checksum = OpamFile.URL.checksum u in
-    match OpamRepository.pull_url kind nv dirname checksum mirrors with
+    OpamRepository.pull_url kind nv dirname checksum mirrors @@+ function
     | Not_available u -> OpamGlobals.error_and_exit "%s is not available" u
-    | Result f
-    | Up_to_date f    -> Some f
+    | Result f | Up_to_date f -> Done (Some f)
 
 let check f =
   let root = OpamPath.root () in

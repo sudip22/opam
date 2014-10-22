@@ -17,7 +17,7 @@
 open OpamTypes
 open OpamMisc.OP
 open OpamFilename.OP
-open OpamParallel.Job.Op
+open OpamProcess.Job.Op
 
 let log msg = OpamGlobals.log "CURL" msg
 let slog = OpamGlobals.slog
