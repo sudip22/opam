@@ -228,6 +228,7 @@ let with_tmp_dir fn =
 
 let with_tmp_dir_job fjob =
   let dir = mk_temp_dir () in
+  mkdir dir;
   OpamProcess.Job.finally (fun () -> remove_dir dir) (fjob dir)
 
 let remove file =
@@ -318,6 +319,20 @@ let print_stats () =
 let log_file name = match name with
   | None   -> temp_file "log"
   | Some n -> temp_file ~dir:(Sys.getcwd ()) n
+
+let make_command ?verbose ?(env=default_env) ?name ?text ?metadata ?allow_stdin ?dir cmd args =
+  let name = log_file name in
+  let verbose =
+    OpamMisc.Option.default (!OpamGlobals.debug || !OpamGlobals.verbose) verbose
+  in
+  (* Check that the command doesn't contain whitespaces *)
+  if None <> try Some (String.index cmd ' ') with Not_found -> None then
+    OpamGlobals.warning "Command %S contains 1 space" cmd;
+  if command_exists ~env cmd then
+    OpamProcess.command ~env ~name ?text ~verbose ?metadata ?allow_stdin ?dir
+      cmd args
+  else
+    command_not_found cmd
 
 let run_process ?verbose ?(env=default_env) ~name ?metadata ?allow_stdin command =
   let chrono = OpamGlobals.timer () in
@@ -612,7 +627,7 @@ let download_command =
       "-t"; retry;
       src
     ] in
-    OpamProcess.command ~dir "wget" wget_args @@> fun r ->
+    make_command ~dir "wget" wget_args @@> fun r ->
     raise_on_process_error r;
     Done ()
   in
@@ -623,7 +638,7 @@ let download_command =
     ] @ (if compress then ["--compressed"] else []) @ [
         "-OL"; src
     ] in
-    OpamProcess.command ~dir command curl_args @@> fun r ->
+    make_command ~dir command curl_args @@> fun r ->
     match r.OpamProcess.r_stdout with
     | [] -> internal_error "curl: empty response while downloading %s" src
     | l  ->
@@ -649,7 +664,7 @@ let really_download ~overwrite ?(compress=false) ~src ~dst =
   let download = (Lazy.force download_command) in
   let aux dir =
     download ~compress dir src @@+ fun () ->
-    match list (fun _ -> true) "." with
+    match list (fun _ -> true) dir with
       ( [] | _::_::_ ) ->
       internal_error "Too many downloaded files."
     | [filename] ->
@@ -662,12 +677,13 @@ let really_download ~overwrite ?(compress=false) ~src ~dst =
       | Some (_,err) -> process_error err
       | None -> Done dst
   in
-  try with_tmp_dir (fun tmp_dir -> aux tmp_dir)
-  with
-  | Internal_error s as e -> OpamGlobals.error "%s" s; raise e
-  | e ->
-    OpamMisc.fatal e;
-    internal_error "Cannot download %s, please check your connection settings." src
+  OpamProcess.Job.catch
+    (function
+      | Internal_error s as e -> OpamGlobals.error "%s" s; raise e
+      | e ->
+        OpamMisc.fatal e;
+        internal_error "Cannot download %s, please check your connection settings." src)
+    (with_tmp_dir_job aux)
 
 let download ~overwrite ?compress ~filename:src ~dst:dst =
   if dst = src then

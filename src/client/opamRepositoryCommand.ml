@@ -515,6 +515,7 @@ let add name kind address ~priority:prio =
   let t = { t with repositories } in
   OpamState.remove_state_cache ();
   try
+    log "RUNRUNRUN";
     let t = OpamProcess.Job.run (update t repo) t in
     fix_descriptions t ~verbose:true
   with

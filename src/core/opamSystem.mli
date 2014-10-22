@@ -130,6 +130,14 @@ val system_ocamlc_version: string option Lazy.t
     Links pointing to directory are also returned. *)
 val directories_with_links: string -> string list
 
+(** Make a comman suitable for OpamProcess.Job *)
+val make_command:
+  ?verbose:bool -> ?env:string array -> ?name:string -> ?text:string ->
+  ?metadata:(string * string) list -> ?allow_stdin:bool -> ?dir:string ->
+  string -> string list -> OpamProcess.command
+
+(** OLD COMMAND API, DEPRECATED *)
+
 (** a command is a list of words *)
 type command = string list
 
@@ -155,6 +163,8 @@ val commands: ?verbose:bool -> ?env:string array -> ?name:string ->
 val read_command_output: ?verbose:bool -> ?env:string array ->
   ?metadata:(string * string) list ->  ?allow_stdin:bool ->
   command -> string list
+
+(** END *)
 
 (** Test whether the file is an archive, by looking as its extension *)
 val is_tar_archive: string -> bool

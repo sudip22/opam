@@ -563,7 +563,7 @@ let build_and_install_package_aux t ~metadata:save_meta nv =
       in
       (* OpamGlobals.msg "%s: %s\n" name (String.concat " " (cmd::args)); *)
       let dir = OpamFilename.Dir.to_string dir in
-      OpamProcess.command ~env ~name ~metadata ~dir ~text cmd args
+      OpamSystem.make_command ~env ~name ~metadata ~dir ~text cmd args
       @@> fun result ->
       if OpamProcess.is_success result then
         run_commands commands

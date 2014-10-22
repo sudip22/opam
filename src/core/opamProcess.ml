@@ -375,7 +375,9 @@ module Job = struct
   let run =
     let rec aux = function
       | Done x -> x
-      | Run (cmd,cont) -> aux (cont (run cmd))
+      | Run (cmd,cont) ->
+        Printf.eprintf "Sequential run: %s\n%!" (string_of_command cmd);
+        aux (cont (run cmd))
     in
     aux
 
@@ -393,12 +395,19 @@ module Job = struct
   let rec catch handler = function
     | Done x -> Done x
     | Run (cmd,cont) ->
-      Run (cmd, fun r -> try catch handler (cont r) with e -> handler e)
+      let cont r =
+        match
+          try `Cont (cont r) with e -> `Hndl (handler e)
+        with
+        | `Cont job -> catch handler job
+        | `Hndl job -> job
+      in
+      Run (cmd, cont)
 
   let rec finally fin = function
     | Done x -> fin (); Done x
     | Run (cmd,cont) ->
-      Run (cmd, fun r -> try finally fin (cont r) with e -> fin (); raise e)
+      Run (cmd, fun r -> finally fin (try cont r with e -> fin (); raise e))
 
   let of_list ?(keep_going=false) l =
     let rec aux err = function
