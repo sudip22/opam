@@ -16,10 +16,11 @@
 
 open OpamTypes
 open OpamFilename.OP
+open OpamProcess.Job.Op
 
 let log fmt = OpamGlobals.log "GIT" fmt
 
-module Git = struct
+module Git : OpamVCS.VCS= struct
 
   let exists repo =
     OpamFilename.exists_dir (repo.repo_root / ".git")
@@ -32,13 +33,15 @@ module Git = struct
         "GIT_COMMITTER_NAME=Opam";
         "GIT_COMMITTER_EMAIL=opam@ocaml.org"
       |] in
-    OpamFilename.in_dir repo.repo_root (fun () ->
-      OpamSystem.commands ~env [
-        [ "git" ; "init" ] ;
-        [ "git" ; "remote" ; "add" ; "origin" ; fst repo.repo_address ] ;
-        [ "git" ; "commit" ; "--allow-empty" ; "-m" ; "opam-git-init" ] ;
-      ]
-    )
+    let dir = OpamFilename.Dir.to_string repo.repo_root in
+    let git = OpamSystem.make_command ~env ~dir "git" in
+    OpamProcess.Job.of_list [
+      git [ "init" ];
+      git [ "remote" ; "add" ; "origin" ; fst repo.repo_address ];
+      git [ "commit" ; "--allow-empty" ; "-m" ; "opam-git-init" ] ;
+    ] @@+ function
+    | None -> Done ()
+    | Some (cmd,err) -> OpamSystem.process_error err
 
   let remote_ref = "refs/remotes/opam-ref"
 

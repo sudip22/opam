@@ -24,6 +24,9 @@ exception Command_not_found of string
 (** raise [Process_error] *)
 val process_error: OpamProcess.result -> 'a
 
+(** raise [Process_error] if the process didn't return 0 *)
+val raise_on_process_error: OpamProcess.result -> unit
+
 (** Exception raised when a computation in the current process
     fails. *)
 exception Internal_error of string

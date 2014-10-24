@@ -176,5 +176,5 @@ module B = struct
 
 end
 
-let register () = assert false
-  (* OpamRepository.register_backend `local (module B: OpamRepository.BACKEND) *)
+let register () =
+  OpamRepository.register_backend `local (module B: OpamRepository.BACKEND)

@@ -25,8 +25,8 @@ let log fmt = OpamGlobals.log "STATE" fmt
 let slog = OpamGlobals.slog
 
 let () =
-  OpamHTTP.register ()(* ; *)
-  (* OpamGit.register (); *)
+  OpamHTTP.register ();
+  OpamGit.register ()(* ; *)
   (* OpamDarcs.register(); *)
   (* OpamLocal.register (); *)
   (* OpamHg.register () *)

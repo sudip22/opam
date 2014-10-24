@@ -3,8 +3,8 @@ begin library "opam-repositories"
   files   = [
     "opamHTTP.ml"
     (* "opamLocal.ml" *)
-    (* "opamVCS.ml" *)
-    (* "opamGit.ml" *)
+    "opamVCS.ml"
+    "opamGit.ml"
     (* "opamDarcs.ml" *)
     (* "opamHg.ml" *)
   ]

@@ -128,8 +128,8 @@ let resolve_deps index names =
 
 let process {index; gener_digest; dryrun; recurse; names; debug; resolve} =
   let () =
-    OpamHTTP.register ()(* ; *)
-    (* OpamGit.register (); *)
+    OpamHTTP.register ();
+    OpamGit.register ();
     (* OpamDarcs.register (); *)
     (* OpamLocal.register (); *)
     (* OpamHg.register () *) in
