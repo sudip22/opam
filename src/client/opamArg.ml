@@ -887,6 +887,89 @@ let show =
 
 
 (* CONFIG *)
+let print_report fmt =
+  let print label f = Format.fprintf fmt ("# %-15s "^^f^^"\n") label in
+  Format.fprintf fmt "# OPAM status report\n";
+  let version = OpamVersion.to_string OpamVersion.current in
+  let version = match OpamVersion.git with
+    | None   -> version
+    | Some v -> Printf.sprintf "%s (%s)" version (OpamVersion.to_string v)
+  in
+  print "opam-version" "%s" version;
+  print "self-upgrade" "%s"
+    (if OpamGlobals.is_self_upgrade
+     then OpamFilename.prettify (fst (self_upgrade_exe (OpamPath.root())))
+     else "no");
+  print "os" "%s" (OpamGlobals.os_string ());
+  print "external-solver" "%s"
+    (if OpamCudf.external_solver_available () then
+       OpamGlobals.get_external_solver ()
+     else "no");
+  print "criteria" "%s"
+    (try List.assoc `Default !OpamGlobals.solver_preferences
+     with Not_found ->
+       try
+         let cfg =
+           OpamFile.Config.read (OpamPath.config (OpamPath.root())) in
+         List.assoc `Default (OpamFile.Config.criteria cfg)
+       with
+       | e ->
+         OpamMisc.fatal e;
+         match OpamCudf.check_cudf_version () with
+         | `Latest -> OpamGlobals.default_preferences `Default ^ "*"
+         | `Compat -> OpamGlobals.compat_preferences `Default ^ "*");
+  try
+    let state = OpamState.load_state "config-report" in
+    let open OpamState.Types in
+    let nprint label n =
+      if n <> 0 then [Printf.sprintf "%d (%s)" n label]
+      else [] in
+    print "jobs" "%d" (OpamState.jobs state);
+    print "repositories" "%s"
+      OpamRepositoryName.Map.(
+        let nhttp, nlocal, nvcs =
+          fold (fun _ {repo_kind=k} (nhttp, nlocal, nvcs) -> match k with
+              | `http -> nhttp+1, nlocal, nvcs
+              | `local -> nhttp, nlocal+1, nvcs
+              | _ -> nhttp, nlocal, nvcs+1)
+            state.repositories (0,0,0) in
+        let has_default =
+          exists (fun _ {repo_address} ->
+              repo_address = OpamRepository.default_address)
+            state.repositories in
+        String.concat ", "
+          (Printf.sprintf "%d%s (http)" nhttp
+             (if has_default then "*" else "") ::
+           nprint "local" nlocal @
+           nprint "version-controlled" nvcs)
+      );
+    print "pinned" "%s"
+      OpamPackage.Name.Map.(
+        if is_empty state.pinned then "0" else
+        let nver, nlocal, nvc =
+          fold (fun _ p (nver, nlocal, nvc) -> match p with
+              | Version _ -> nver+1, nlocal, nvc
+              | Local _ -> nver, nlocal+1, nvc
+              | _ -> nver, nlocal, nvc+1)
+            state.pinned (0,0,0) in
+        String.concat ", "
+          (nprint "version" nver @
+           nprint "path" nlocal @
+           nprint "version control" nvc)
+      );
+    print "current-switch" "%s%s"
+      (OpamSwitch.to_string state.switch)
+      (if (OpamFile.Comp.preinstalled
+             (OpamFile.Comp.read
+                (OpamPath.compiler_comp state.root state.compiler)))
+       then "*" else "");
+    let index_file = OpamFilename.to_string (OpamPath.package_index state.root) in
+    let u = Unix.gmtime (Unix.stat index_file).Unix.st_mtime in
+    Unix.(print "last-update" "%04d-%02d-%02d %02d:%02d"
+            (1900 + u.tm_year) (1 + u.tm_mon) u.tm_mday
+            u.tm_hour u.tm_min);
+  with e -> print "read-state" "%s" (Printexc.to_string e)
+
 let config_doc = "Display configuration options for packages."
 let config =
   let doc = config_doc in
@@ -1051,89 +1134,7 @@ let config =
        | [] -> `Ok (dump stdout)
        | [file] -> let oc = open_out file in dump oc; close_out oc; `Ok ()
        | _ -> bad_subcommand "config" commands command params)
-    | Some `report, [] -> (
-      let print label fmt = Printf.printf ("# %-15s "^^fmt^^"\n") label in
-      Printf.printf "# OPAM status report\n";
-      let version = OpamVersion.to_string OpamVersion.current in
-      let version = match OpamVersion.git with
-        | None   -> version
-        | Some v -> Printf.sprintf "%s (%s)" version (OpamVersion.to_string v)
-      in
-      print "opam-version" "%s" version;
-      print "self-upgrade" "%s"
-        (if OpamGlobals.is_self_upgrade
-         then OpamFilename.prettify (fst (self_upgrade_exe (OpamPath.root())))
-         else "no");
-      print "os" "%s" (OpamGlobals.os_string ());
-      print "external-solver" "%s"
-        (if OpamCudf.external_solver_available () then
-           OpamGlobals.get_external_solver ()
-         else "no");
-      print "criteria" "%s"
-        (try List.assoc `Default !OpamGlobals.solver_preferences
-         with Not_found ->
-           try
-             let cfg =
-               OpamFile.Config.read (OpamPath.config (OpamPath.root())) in
-             List.assoc `Default (OpamFile.Config.criteria cfg)
-           with
-           | e ->
-             OpamMisc.fatal e;
-             match OpamCudf.check_cudf_version () with
-              | `Latest -> OpamGlobals.default_preferences `Default ^ "*"
-              | `Compat -> OpamGlobals.compat_preferences `Default ^ "*");
-      try
-        let state = OpamState.load_state "config-report" in
-        let open OpamState.Types in
-        let nprint label n =
-          if n <> 0 then [Printf.sprintf "%d (%s)" n label]
-          else [] in
-        print "jobs" "%d" (OpamState.jobs state);
-        print "repositories" "%s"
-          OpamRepositoryName.Map.(
-            let nhttp, nlocal, nvcs =
-              fold (fun _ {repo_kind=k} (nhttp, nlocal, nvcs) -> match k with
-                  | `http -> nhttp+1, nlocal, nvcs
-                  | `local -> nhttp, nlocal+1, nvcs
-                  | _ -> nhttp, nlocal, nvcs+1)
-                state.repositories (0,0,0) in
-            let has_default =
-              exists (fun _ {repo_address} ->
-                  repo_address = OpamRepository.default_address)
-                state.repositories in
-            String.concat ", "
-              (Printf.sprintf "%d%s (http)" nhttp
-                 (if has_default then "*" else "") ::
-               nprint "local" nlocal @
-               nprint "version-controlled" nvcs)
-          );
-        print "pinned" "%s"
-          OpamPackage.Name.Map.(
-            if is_empty state.pinned then "0" else
-            let nver, nlocal, nvc =
-              fold (fun _ p (nver, nlocal, nvc) -> match p with
-                  | Version _ -> nver+1, nlocal, nvc
-                  | Local _ -> nver, nlocal+1, nvc
-                  | _ -> nver, nlocal, nvc+1)
-                state.pinned (0,0,0) in
-            String.concat ", "
-              (nprint "version" nver @
-               nprint "path" nlocal @
-               nprint "version control" nvc)
-          );
-        print "current-switch" "%s%s"
-          (OpamSwitch.to_string state.switch)
-          (if (OpamFile.Comp.preinstalled
-                 (OpamFile.Comp.read
-                    (OpamPath.compiler_comp state.root state.compiler)))
-           then "*" else "");
-        let index_file = OpamFilename.to_string (OpamPath.package_index state.root) in
-        let u = Unix.gmtime (Unix.stat index_file).Unix.st_mtime in
-        Unix.(print "last-update" "%04d-%02d-%02d %02d:%02d"
-              (1900 + u.tm_year) (1 + u.tm_mon) u.tm_mday
-              u.tm_hour u.tm_min);
-        `Ok ()
-      with e -> print "read-state" "%s" (Printexc.to_string e); `Ok ())
+    | Some `report, [] -> print_report Format.std_formatter; `Ok ()
     | command, params -> bad_subcommand "config" commands command params
   in
 
