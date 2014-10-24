@@ -471,17 +471,21 @@ let sources_needed t solution =
     OpamPackage.Set.of_list
       (List.filter (removal_needs_download t)
          solution.to_remove) in
+  let has_source nv = OpamState.url t nv <> None in
   PackageActionGraph.fold_vertex (fun act acc ->
       match act with
       | To_delete nv ->
-        if removal_needs_download t nv
+        if removal_needs_download t nv && has_source nv
         then OpamPackage.Set.add nv acc else acc
-      | To_change (None,nv) | To_recompile nv ->
+      | To_change (None,nv) | To_recompile nv when has_source nv ->
         OpamPackage.Set.add nv acc
       | To_change (Some nv1, nv2) ->
-        let acc = OpamPackage.Set.add nv2 acc in
-        if removal_needs_download t nv1
-        then OpamPackage.Set.add nv1 acc else acc)
+        let acc =
+          if has_source nv2 then OpamPackage.Set.add nv2 acc else acc
+        in
+        if removal_needs_download t nv1 && has_source nv1
+        then OpamPackage.Set.add nv1 acc else acc
+      | _ -> acc)
     solution.to_process pkgs
 
 let remove_package t ~metadata ?keep_build ?silent nv =
