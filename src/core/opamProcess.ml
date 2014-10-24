@@ -105,7 +105,9 @@ let string_of_info ?(color=`yellow) info =
     set). *)
 let create ?info_file ?env_file ?(allow_stdin=true) ?stdout_file ?stderr_file ?env ?(metadata=[]) ?dir
     ~verbose cmd args =
-  Printf.eprintf "Command: \"%s\"\n%!" (String.concat "\" \"" (cmd::args));
+  Printf.eprintf "Command%s: \"%s\"\n%!"
+    (match dir with None -> "" | Some d -> "["^d^"]")
+    (String.concat "\" \"" (cmd::args));
   let nothing () = () in
   let tee f =
     let fd = Unix.openfile f open_flags 0o644 in
