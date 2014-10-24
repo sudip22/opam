@@ -257,11 +257,11 @@ let wait p =
     | _ -> iter () in
   iter ()
 
-let dontwait p =
+let rec dontwait p =
   match Unix.waitpid [Unix.WNOHANG] p.p_pid with
   | 0, _ -> None
   | _, Unix.WEXITED code -> Some (exit_status p code)
-  | _, _ -> None
+  | _, _ -> dontwait p
 
 let dead_childs = Hashtbl.create 13
 let wait_one processes =

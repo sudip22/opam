@@ -703,14 +703,11 @@ let really_download ~overwrite ?(compress=false) ~src ~dst =
       ( [] | _::_::_ ) ->
       internal_error "Too many downloaded files."
     | [filename] ->
-      if not overwrite && Sys.file_exists dst then
-        internal_error "The downloaded file will overwrite %s." dst;
-      OpamProcess.Job.of_list [
-        OpamProcess.command ~dir "rm" ["-f"; dst];
-        OpamProcess.command ~dir "mv" [filename; dst ];
-      ] @@+ function
-      | Some (_,err) -> process_error err
-      | None -> Done dst
+      if Sys.file_exists dst then
+        if overwrite then remove dst
+        else internal_error "The downloaded file will overwrite %s." dst;
+      OpamProcess.command ~dir "mv" [filename; dst ]
+      @@> fun r -> raise_on_process_error r; Done dst
   in
   OpamProcess.Job.catch
     (function
@@ -724,14 +721,11 @@ let download ~overwrite ?compress ~filename:src ~dst:dst =
   if dst = src then
     Done dst
   else if Sys.file_exists src then (
-    if not overwrite && Sys.file_exists dst then
-      internal_error "The downloaded file will overwrite %s." dst;
-    OpamProcess.Job.of_list
-      [ OpamProcess.command "rm" ["-f"; dst];
-        OpamProcess.command "cp" [src; dst] ]
-    @@+ function
-    | None -> Done dst
-    | Some (_,err) -> process_error err
+    if Sys.file_exists dst then
+      if overwrite then remove dst
+      else internal_error "The downloaded file will overwrite %s." dst;
+    OpamProcess.command "cp" [src; dst]
+    @@> fun r -> raise_on_process_error r; Done dst
   ) else
     really_download ~overwrite ?compress ~src ~dst
 
