@@ -105,9 +105,9 @@ let string_of_info ?(color=`yellow) info =
     set). *)
 let create ?info_file ?env_file ?(allow_stdin=true) ?stdout_file ?stderr_file ?env ?(metadata=[]) ?dir
     ~verbose cmd args =
-  Printf.eprintf "Command%s: \"%s\"\n%!"
-    (match dir with None -> "" | Some d -> "["^d^"]")
-    (String.concat "\" \"" (cmd::args));
+  (* Printf.eprintf "Command%s: \"%s\"\n%!" *)
+  (*   (match dir with None -> "" | Some d -> "["^d^"]") *)
+  (*   (String.concat "\" \"" (cmd::args)); *)
   let nothing () = () in
   let tee f =
     let fd = Unix.openfile f open_flags 0o644 in
@@ -379,7 +379,7 @@ module Job = struct
     let rec aux = function
       | Done x -> x
       | Run (cmd,cont) ->
-        Printf.eprintf "Sequential run: %s\n%!" (string_of_command cmd);
+        (* Printf.eprintf "Sequential run: %s\n%!" (string_of_command cmd); *)
         aux (cont (run cmd))
     in
     aux
@@ -426,6 +426,10 @@ module Job = struct
     in
     aux None l
 
+  let rec with_text text = function
+    | Done _ as j -> j
+    | Run (cmd, cont) ->
+      Run ({cmd with cmd_text = Some text}, fun r -> with_text text (cont r))
 end
 
 type 'a job = 'a Job.Op.job

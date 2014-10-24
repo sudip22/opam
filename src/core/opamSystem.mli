@@ -142,7 +142,7 @@ val make_command:
 type command = string list
 
 (** Test whether a command exists in the environment. *)
-val command_exists: ?env:string array -> string -> bool
+val command_exists: ?env:string array -> ?dir:string -> string -> bool
 
 (** [command cmd] executes the command [cmd] in the correct OPAM
     environment. *)

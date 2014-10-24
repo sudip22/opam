@@ -140,6 +140,9 @@ module Job: sig
       Unless [keep_going] is true, stops on first error. *)
   val of_list: ?keep_going:bool -> command list ->
     (command * result) option Op.job
+
+  (** Sets and overrides text of the underlying commands *)
+  val with_text: string -> 'a Op.job -> 'a Op.job
 end
 
 type 'a job = 'a Job.Op.job

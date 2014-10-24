@@ -302,36 +302,45 @@ let env_var env var =
   aux 0
 
 let command_exists =
-  let check_existence env name =
+  let is_external_cmd name = Filename.basename name <> name in
+  let check_existence ?dir env name =
     let cmd, args = "/bin/sh", ["-c"; Printf.sprintf "command -v %s" name] in
     let r =
       OpamProcess.run
-        (OpamProcess.command ~env ~name:(temp_file "command") ~verbose:false
+        (OpamProcess.command ~env ?dir ~name:(temp_file "command") ~verbose:false
            cmd args)
     in
     OpamProcess.cleanup ~force:true r;
     if OpamProcess.is_success r then
-      let is_external_cmd s = String.contains s '/' in
       match r.OpamProcess.r_stdout with
-        cmdname::_ ->
+      | cmdname::_ ->
         (* check that we have permission to execute the command *)
-	if is_external_cmd cmdname then
-	  (try 
-	     let open Unix in
-	     let uid = getuid() and groups = Array.to_list(getgroups()) in
-	     let s = stat cmdname in
-	     let cmd_uid = s.st_uid and cmd_gid = s.st_gid and cmd_perms = s.st_perm in
+        if is_external_cmd cmdname then
+          let cmdname =
+            match Filename.is_relative cmdname, dir with
+            | true, Some dir -> Filename.concat dir cmdname
+            | _ -> cmdname
+          in
+          (try
+
+             let open Unix in
+             let uid = getuid() and groups = Array.to_list(getgroups()) in
+             let s = stat cmdname in
+             let cmd_uid = s.st_uid and cmd_gid = s.st_gid and cmd_perms = s.st_perm in
              let mask = 0o001
-		        lor (if uid = cmd_uid then 0o100 else 0)
-		        lor (if List.mem cmd_gid groups then 0o010 else 0) in
-	     (cmd_perms land mask) <> 0
+                        lor (if uid = cmd_uid then 0o100 else 0)
+                        lor (if List.mem cmd_gid groups then 0o010 else 0) in
+             (cmd_perms land mask) <> 0
            with _ -> false)
-	else true
+        else true
       | _ -> false
     else false
   in
   let cached_results = Hashtbl.create 17 in
-  fun ?(env=default_env) name ->
+  fun ?(env=default_env) ?dir name ->
+    if dir <> None && is_external_cmd name then
+      check_existence env ?dir name (* relative command, no caching *)
+    else
     let path = env_var env "PATH" in
     try Hashtbl.find (Hashtbl.find cached_results path) name
     with Not_found ->
@@ -363,7 +372,7 @@ let make_command ?verbose ?(env=default_env) ?name ?text ?metadata ?allow_stdin 
   (* Check that the command doesn't contain whitespaces *)
   if None <> try Some (String.index cmd ' ') with Not_found -> None then
     OpamGlobals.warning "Command %S contains 1 space" cmd;
-  if command_exists ~env cmd then
+  if command_exists ~env ?dir cmd then
     OpamProcess.command ~env ~name ?text ~verbose ?metadata ?allow_stdin ?dir
       cmd args
   else
